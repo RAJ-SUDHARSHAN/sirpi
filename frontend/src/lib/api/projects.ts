@@ -10,6 +10,7 @@ export interface Project {
   slug: string;
   repository_url: string;
   repository_name: string;
+  installation_id?: number;
   language: string | null;
   description: string | null;
   status: string;

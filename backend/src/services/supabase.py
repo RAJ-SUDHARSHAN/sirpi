@@ -148,6 +148,7 @@ class SupabaseService:
         template_type: str,
         status: str,
         files: Optional[List[Dict[str, Any]]] = None,
+        s3_keys: Optional[List[str]] = None,
         project_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Save a new generation record to database."""
@@ -158,7 +159,7 @@ class SupabaseService:
                         """
                         INSERT INTO generations 
                         (user_id, session_id, repository_url, template_type, status, 
-                         files, project_context, created_at, updated_at)
+                         s3_keys, project_context, created_at, updated_at)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                         RETURNING id, created_at
                     """,
@@ -168,7 +169,7 @@ class SupabaseService:
                             repository_url,
                             template_type,
                             status,
-                            Json(files or []),
+                            Json(s3_keys or []),
                             Json(project_context or {}),
                         ),
                     )

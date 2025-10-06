@@ -32,6 +32,7 @@ async def start_workflow(
     request: WorkflowStartRequest, user_id: str = Depends(get_current_user_id)
 ):
     try:
+        logger.info(f"Workflow start request: {request.dict()}")
         session_id = generate_session_id()
 
         try:

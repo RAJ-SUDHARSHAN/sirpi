@@ -1,0 +1,21 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FullCDKAccess",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:*",
+        "s3:*",
+        "iam:*",
+        "bedrock:*",
+        "lambda:*",
+        "logs:*",
+        "ssm:*",
+        "ecr:*",
+        "sts:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

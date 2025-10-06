@@ -1,0 +1,252 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Sirpi AWS Setup - Creates resources for infrastructure automation"
+
+Parameters:
+  SirpiAccountId:
+    Type: String
+    Description: "Sirpi AWS Account ID (provided during setup)"
+    Default: "123456789012" # Replace with actual Sirpi account ID
+
+  ExternalId:
+    Type: String
+    Description: "Unique external ID for security (provided during setup)"
+    NoEcho: true
+
+Resources:
+  # S3 Bucket for Terraform State
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "sirpi-terraform-states-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
+      Tags:
+        - Key: ManagedBy
+          Value: Sirpi
+        - Key: Purpose
+          Value: TerraformState
+
+  # DynamoDB Table for State Locking
+  TerraformLockTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: sirpi-terraform-locks
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockID
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: ManagedBy
+          Value: Sirpi
+        - Key: Purpose
+          Value: TerraformLocking
+
+  # IAM Role that Sirpi assumes to manage resources
+  SirpiExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SirpiInfrastructureAutomationRole
+      Description: "Allows Sirpi to deploy infrastructure in this AWS account"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${SirpiAccountId}:root"
+            Action: "sts:AssumeRole"
+            Condition:
+              StringEquals:
+                "sts:ExternalId": !Ref ExternalId
+      ManagedPolicyArns:
+        - !Ref SirpiInfrastructurePolicy
+      Tags:
+        - Key: ManagedBy
+          Value: Sirpi
+
+  # Custom IAM Policy with least-privilege permissions
+  SirpiInfrastructurePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: SirpiInfrastructureDeploymentPolicy
+      Description: "Permissions for Sirpi to deploy and manage infrastructure"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # VPC Management
+          - Sid: VPCManagement
+            Effect: Allow
+            Action:
+              - ec2:CreateVpc
+              - ec2:DeleteVpc
+              - ec2:DescribeVpcs
+              - ec2:ModifyVpcAttribute
+              - ec2:CreateSubnet
+              - ec2:DeleteSubnet
+              - ec2:DescribeSubnets
+              - ec2:CreateInternetGateway
+              - ec2:AttachInternetGateway
+              - ec2:DetachInternetGateway
+              - ec2:DeleteInternetGateway
+              - ec2:CreateRouteTable
+              - ec2:DeleteRouteTable
+              - ec2:AssociateRouteTable
+              - ec2:CreateRoute
+              - ec2:DeleteRoute
+              - ec2:DescribeRouteTables
+              - ec2:DescribeInternetGateways
+            Resource: "*"
+
+          # Security Groups
+          - Sid: SecurityGroupManagement
+            Effect: Allow
+            Action:
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:DescribeSecurityGroups
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:RevokeSecurityGroupEgress
+              - ec2:CreateTags
+            Resource: "*"
+
+          # ECS Fargate
+          - Sid: ECSManagement
+            Effect: Allow
+            Action:
+              - ecs:CreateCluster
+              - ecs:DeleteCluster
+              - ecs:DescribeClusters
+              - ecs:RegisterTaskDefinition
+              - ecs:DeregisterTaskDefinition
+              - ecs:DescribeTaskDefinition
+              - ecs:CreateService
+              - ecs:UpdateService
+              - ecs:DeleteService
+              - ecs:DescribeServices
+              - ecs:ListServices
+              - ecs:ListTasks
+            Resource: "*"
+
+          # Application Load Balancer
+          - Sid: ALBManagement
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:CreateLoadBalancer
+              - elasticloadbalancing:DeleteLoadBalancer
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:CreateTargetGroup
+              - elasticloadbalancing:DeleteTargetGroup
+              - elasticloadbalancing:DescribeTargetGroups
+              - elasticloadbalancing:CreateListener
+              - elasticloadbalancing:DeleteListener
+              - elasticloadbalancing:DescribeListeners
+              - elasticloadbalancing:ModifyLoadBalancerAttributes
+              - elasticloadbalancing:ModifyTargetGroupAttributes
+              - elasticloadbalancing:AddTags
+            Resource: "*"
+
+          # ECR
+          - Sid: ECRManagement
+            Effect: Allow
+            Action:
+              - ecr:CreateRepository
+              - ecr:DeleteRepository
+              - ecr:DescribeRepositories
+              - ecr:GetAuthorizationToken
+              - ecr:PutImage
+              - ecr:BatchCheckLayerAvailability
+            Resource: "*"
+
+          # IAM Role Management (for ECS tasks)
+          - Sid: IAMRoleManagement
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:GetRole
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:PassRole
+              - iam:CreatePolicy
+              - iam:DeletePolicy
+              - iam:GetPolicy
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/sirpi-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:policy/sirpi-*"
+
+          # CloudWatch Logs
+          - Sid: CloudWatchLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:DescribeLogGroups
+              - logs:PutRetentionPolicy
+            Resource: "*"
+
+          # S3 State Management
+          - Sid: StateManagement
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+              - s3:GetObjectVersion
+            Resource:
+              - !GetAtt TerraformStateBucket.Arn
+              - !Sub "${TerraformStateBucket.Arn}/*"
+
+          # DynamoDB State Locking
+          - Sid: StateLocking
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:DeleteItem
+            Resource: !GetAtt TerraformLockTable.Arn
+
+Outputs:
+  RoleArn:
+    Description: "IAM Role ARN for Sirpi to assume"
+    Value: !GetAtt SirpiExecutionRole.Arn
+    Export:
+      Name: SirpiExecutionRoleArn
+
+  ExternalId:
+    Description: "External ID for secure role assumption"
+    Value: !Ref ExternalId
+
+  TerraformStateBucket:
+    Description: "S3 Bucket for Terraform state storage"
+    Value: !Ref TerraformStateBucket
+    Export:
+      Name: SirpiTerraformStateBucket
+
+  TerraformLockTable:
+    Description: "DynamoDB table for Terraform state locking"
+    Value: !Ref TerraformLockTable
+    Export:
+      Name: SirpiTerraformLockTable
+
+  SetupInstructions:
+    Description: "Next steps"
+    Value: "Copy the RoleArn and provide it to Sirpi to complete AWS account connection"

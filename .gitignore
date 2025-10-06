@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+uv.lock
+
+# Node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# CDK Build Artifacts
+infrastructure/cdk.out/
+infrastructure/lib/**/*.js
+infrastructure/lib/**/*.d.ts
+infrastructure/lib/**/*.js.map
+infrastructure/bin/**/*.js
+infrastructure/bin/**/*.d.ts
+infrastructure/bin/**/*.js.map
+
+# Environment Files
+.env
+.env.local
+.env.*.local
+
+# Secrets
+*.pem
+github-app-private-key.pem
+
+# IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Build
+dist/
+build/
+
+# Vercel
+.vercel
+
+# AWS
+.aws-sam/

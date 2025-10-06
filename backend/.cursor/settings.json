@@ -1,0 +1,25 @@
+{
+  "yaml.schemas": {
+    "https://s3.amazonaws.com/cfn-resource-specifications/schemas/2.15.0/all-spec.json": "src/agentcore/cloudformation/**/*.yaml"
+  },
+  "yaml.customTags": [
+    "!And",
+    "!If",
+    "!Not",
+    "!Equals",
+    "!Or",
+    "!FindInMap",
+    "!Base64",
+    "!Cidr",
+    "!Ref",
+    "!Sub",
+    "!GetAtt",
+    "!GetAZs",
+    "!ImportValue",
+    "!Select",
+    "!Split",
+    "!Join"
+  ]
+}
+
+

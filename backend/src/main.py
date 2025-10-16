@@ -5,7 +5,17 @@ from fastapi.responses import JSONResponse
 import logging
 
 from src.core.config import settings
-from src.api import health, workflows, github, clerk_webhooks, projects
+from src.api import (
+    health,
+    workflows,
+    github,
+    clerk_webhooks,
+    projects,
+    pull_requests,
+    github_webhooks,
+    deployments,
+    aws,
+)
 from src.utils.logging_config import setup_logging
 
 setup_logging()
@@ -41,6 +51,10 @@ app.include_router(workflows.router, prefix=settings.api_v1_prefix, tags=["Workf
 app.include_router(github.router, prefix=settings.api_v1_prefix, tags=["GitHub"])
 app.include_router(clerk_webhooks.router, prefix=settings.api_v1_prefix, tags=["Webhooks"])
 app.include_router(projects.router, prefix=settings.api_v1_prefix, tags=["Projects"])
+app.include_router(pull_requests.router, prefix=settings.api_v1_prefix, tags=["Pull Requests"])
+app.include_router(github_webhooks.router, prefix=settings.api_v1_prefix, tags=["GitHub Webhooks"])
+app.include_router(deployments.router, prefix=settings.api_v1_prefix, tags=["Deployments"])
+app.include_router(aws.router, prefix=settings.api_v1_prefix, tags=["AWS Setup"])
 
 
 @app.exception_handler(Exception)

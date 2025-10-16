@@ -99,7 +99,7 @@ export default function UserProjectsPage() {
         ]);
         setGithubInstallation(installation);
         setUserOverview(overview as unknown as UserOverview);
-      } catch (error) {
+      } catch {
         // Error is handled by the calling code
       } finally {
         setIsLoading(false);

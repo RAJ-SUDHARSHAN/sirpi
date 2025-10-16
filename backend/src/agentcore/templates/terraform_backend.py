@@ -6,7 +6,7 @@ Ensures state is stored in S3 with DynamoDB locking.
 from src.core.config import settings
 
 
-def generate_backend_config(project_id: str) -> str:
+def generate_backend_config(project_id: str, account_id: str = None) -> str:
     """
     Generate Terraform backend configuration for S3 state storage.
     
@@ -17,14 +17,21 @@ def generate_backend_config(project_id: str) -> str:
     
     Args:
         project_id: Unique project identifier
+        account_id: User's AWS account ID (for bucket name suffix)
         
     Returns:
         backend.tf content
     """
     
+    # Use account_id suffix if provided (for user's account)
+    # Otherwise use base bucket name (for Sirpi's account)
+    bucket_name = settings.s3_terraform_state_bucket
+    if account_id:
+        bucket_name = f"{bucket_name}-{account_id}"
+    
     return f'''terraform {{
   backend "s3" {{
-    bucket         = "{settings.s3_terraform_state_bucket}"
+    bucket         = "{bucket_name}"
     key            = "states/{project_id}/terraform.tfstate"
     region         = "{settings.s3_region}"
     dynamodb_table = "{settings.dynamodb_terraform_lock_table}"

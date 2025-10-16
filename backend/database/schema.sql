@@ -97,6 +97,8 @@ CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
 CREATE INDEX IF NOT EXISTS idx_generations_user_id ON generations(user_id);
 CREATE INDEX IF NOT EXISTS idx_generations_session_id ON generations(session_id);
+CREATE INDEX IF NOT EXISTS idx_aws_connections_user_id ON aws_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_aws_connections_external_id ON aws_connections(external_id);
 
 -- =====================================================
 -- ROW LEVEL SECURITY (RLS)
@@ -158,6 +160,31 @@ CREATE POLICY generations_insert_own ON generations
 CREATE POLICY generations_update_own ON generations
     FOR UPDATE USING (user_id = requesting_user_id());
 
+-- AWS Connections (for cross-account deployment)
+CREATE TABLE IF NOT EXISTS aws_connections (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id TEXT NOT NULL,
+    external_id TEXT UNIQUE NOT NULL,
+    role_arn TEXT,
+    status TEXT DEFAULT 'pending',
+    verified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id)
+);
+
+-- AWS connections policies
+DROP POLICY IF EXISTS aws_connections_select_own ON aws_connections;
+DROP POLICY IF EXISTS aws_connections_insert_own ON aws_connections;
+DROP POLICY IF EXISTS aws_connections_update_own ON aws_connections;
+
+CREATE POLICY aws_connections_select_own ON aws_connections
+    FOR SELECT USING (user_id = requesting_user_id());
+CREATE POLICY aws_connections_insert_own ON aws_connections
+    FOR INSERT WITH CHECK (user_id = requesting_user_id());
+CREATE POLICY aws_connections_update_own ON aws_connections
+    FOR UPDATE USING (user_id = requesting_user_id());
+
 -- =====================================================
 -- TRIGGERS
 -- =====================================================
@@ -166,6 +193,7 @@ DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 DROP TRIGGER IF EXISTS update_installations_updated_at ON github_installations;
 DROP TRIGGER IF EXISTS update_projects_updated_at ON projects;
 DROP TRIGGER IF EXISTS update_generations_updated_at ON generations;
+DROP TRIGGER IF EXISTS update_aws_connections_updated_at ON aws_connections;
 
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -177,4 +205,7 @@ CREATE TRIGGER update_projects_updated_at BEFORE UPDATE ON projects
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_generations_updated_at BEFORE UPDATE ON generations
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_aws_connections_updated_at BEFORE UPDATE ON aws_connections
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

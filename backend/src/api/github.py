@@ -1,7 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import RedirectResponse
-import hmac
-import hashlib
 import logging
 
 from src.services.github_app import get_github_app, GitHubAppError
@@ -78,47 +76,6 @@ async def github_app_callback(
     except Exception as e:
         logger.error(f"GitHub callback error: {type(e).__name__}", exc_info=True)
         raise HTTPException(status_code=500, detail="Installation failed")
-
-
-@router.post("/webhooks/github")
-async def github_webhook_handler(request: Request):
-    signature = request.headers.get("X-Hub-Signature-256")
-    if not signature:
-        raise HTTPException(status_code=401, detail="Missing signature")
-
-    body = await request.body()
-    expected_sig = (
-        "sha256="
-        + hmac.new(settings.github_app_webhook_secret.encode(), body, hashlib.sha256).hexdigest()
-    )
-
-    if not hmac.compare_digest(signature, expected_sig):
-        raise HTTPException(status_code=401, detail="Invalid signature")
-
-    event_type = request.headers.get("X-GitHub-Event")
-
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
-    if event_type == "installation":
-        action = payload.get("action")
-        installation = payload.get("installation", {})
-        installation_id = installation.get("id")
-
-        if not installation_id:
-            raise HTTPException(status_code=400, detail="Missing installation ID")
-
-        if action == "deleted":
-            try:
-                supabase.deactivate_installation(installation_id)
-            except DatabaseError:
-                pass
-
-        return {"message": f"Installation {action} processed"}
-
-    return {"message": "Event received"}
 
 
 @router.get("/github/installation")

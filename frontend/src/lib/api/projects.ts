@@ -14,6 +14,11 @@ export interface Project {
   language: string | null;
   description: string | null;
   status: string;
+  deployment_status?: string;
+  deployment_error?: string | null;
+  deployment_started_at?: string | null;
+  deployment_completed_at?: string | null;
+  aws_connection_id?: string | null;
   created_at: string;
 }
 
@@ -108,6 +113,24 @@ export const projectsApi = {
     }
   },
 
+  async getProjectById(projectId: string): Promise<Project | null> {
+    try {
+      const response = await apiCall(`/projects/${projectId}`, {
+        method: "GET",
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error(`Failed to fetch project: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.success ? data.project : null;
+    } catch {
+      return null;
+    }
+  },
+
   async getImportedRepositories(): Promise<Record<string, unknown>[]> {
     try {
       const response = await apiCall("/projects/repositories");
@@ -132,5 +155,27 @@ export const projectsApi = {
         items: projects,
       },
     };
+  },
+
+  async getProjectAWSStatus(projectId: string): Promise<{
+    aws_connected: boolean;
+    aws_connection_id?: string | null;
+    aws_role_arn?: string | null;
+    aws_status: string;
+  }> {
+    try {
+      const response = await apiCall(`/projects/${projectId}/aws-status`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch AWS status: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.success
+        ? data
+        : { aws_connected: false, aws_status: "not_connected" };
+    } catch {
+      return { aws_connected: false, aws_status: "not_connected" };
+    }
   },
 };

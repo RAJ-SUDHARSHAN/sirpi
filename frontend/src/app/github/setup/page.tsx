@@ -4,10 +4,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { GitHubIcon } from "@/components/ui/icons";
 
-export default async function GitHubSetupPage({
-  searchParams,
-}: {
-  searchParams: { [key: string]: string | string[] | undefined };
+export default async function GitHubSetupPage(props: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { userId } = await auth();
 
@@ -15,6 +13,7 @@ export default async function GitHubSetupPage({
     redirect("/sign-in");
   }
 
+  const searchParams = await props.searchParams;
   const success = searchParams.success === "true";
   const installationId = searchParams.installation_id as string;
 

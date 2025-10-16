@@ -15,6 +15,8 @@ class TemplateType(str, Enum):
     DOCKER_COMPOSE = "docker-compose"
     KUBERNETES = "kubernetes"
     ECS_FARGATE = "ecs-fargate"
+    EC2 = "ec2"
+    LAMBDA = "lambda"
 
 
 class WorkflowStatus(str, Enum):
@@ -24,6 +26,15 @@ class WorkflowStatus(str, Enum):
     STARTED = "started"
     ANALYZING = "analyzing"
     GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DeploymentStatus(str, Enum):
+    """Deployment execution status."""
+
+    STARTING = "starting"
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -39,6 +50,9 @@ class WorkflowStartRequest(BaseModel):
         default=TemplateType.DOCKER, description="Infrastructure template to generate"
     )
     branch: str = Field(default="main", description="Git branch to analyze")
+    project_id: Optional[str] = Field(
+        default=None, description="Project UUID to link generation to"
+    )
 
 
 class ProjectContext(BaseModel):
@@ -121,3 +135,34 @@ class HealthResponse(BaseModel):
     version: str = "0.1.0"
     environment: str
     services: Dict[str, str] = {}
+
+
+# Deployment API Models
+
+
+class DeploymentStartRequest(BaseModel):
+    """Request to start cross-account deployment."""
+
+    role_arn: str = Field(..., description="AWS IAM role ARN for cross-account access")
+    external_id: str = Field(..., description="External ID for role assumption security")
+    files: List[Dict[str, Any]] = Field(..., description="Generated infrastructure files")
+    project_id: Optional[str] = Field(default=None, description="Project UUID")
+
+
+class DeploymentStartResponse(BaseModel):
+    """Response from deployment start request."""
+
+    session_id: str
+    status: str
+    message: str
+    stream_url: str
+
+
+class DeploymentStatusResponse(BaseModel):
+    """Current deployment status."""
+
+    session_id: str
+    status: str
+    message: str
+    logs: List[Dict[str, Any]] = []
+    result: Optional[Dict[str, Any]] = None

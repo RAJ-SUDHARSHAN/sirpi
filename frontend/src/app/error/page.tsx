@@ -1,10 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { ExclamationCircleIcon } from "@/components/ui/icons";
 
-export default function ErrorPage() {
+function ErrorContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -101,5 +101,19 @@ export default function ErrorPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ErrorPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-black flex items-center justify-center">
+          <div className="text-white">Loading...</div>
+        </div>
+      }
+    >
+      <ErrorContent />
+    </Suspense>
   );
 }

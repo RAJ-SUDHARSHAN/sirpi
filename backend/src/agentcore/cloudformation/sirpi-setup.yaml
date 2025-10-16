@@ -5,7 +5,7 @@ Parameters:
   SirpiAccountId:
     Type: String
     Description: "Sirpi AWS Account ID (provided during setup)"
-    Default: "123456789012" # Replace with actual Sirpi account ID
+    Default: "183129768772"
 
   ExternalId:
     Type: String
@@ -89,7 +89,7 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # VPC Management
+          # VPC and Networking
           - Sid: VPCManagement
             Effect: Allow
             Action:
@@ -97,20 +97,35 @@ Resources:
               - ec2:DeleteVpc
               - ec2:DescribeVpcs
               - ec2:ModifyVpcAttribute
+              - ec2:DescribeVpcAttribute
               - ec2:CreateSubnet
               - ec2:DeleteSubnet
               - ec2:DescribeSubnets
+              - ec2:ModifySubnetAttribute
               - ec2:CreateInternetGateway
               - ec2:AttachInternetGateway
               - ec2:DetachInternetGateway
               - ec2:DeleteInternetGateway
+              - ec2:DescribeInternetGateways
               - ec2:CreateRouteTable
               - ec2:DeleteRouteTable
               - ec2:AssociateRouteTable
+              - ec2:DisassociateRouteTable
               - ec2:CreateRoute
               - ec2:DeleteRoute
               - ec2:DescribeRouteTables
-              - ec2:DescribeInternetGateways
+              - ec2:CreateNatGateway
+              - ec2:DeleteNatGateway
+              - ec2:DescribeNatGateways
+              - ec2:AllocateAddress
+              - ec2:ReleaseAddress
+              - ec2:DescribeAddresses
+              - ec2:DescribeAddressesAttribute
+              - ec2:DescribeAvailabilityZones
+              - ec2:DescribeAccountAttributes
+              - ec2:DescribeNetworkInterfaces
+              - ec2:CreateTags
+              - ec2:DeleteTags
             Resource: "*"
 
           # Security Groups
@@ -120,11 +135,14 @@ Resources:
               - ec2:CreateSecurityGroup
               - ec2:DeleteSecurityGroup
               - ec2:DescribeSecurityGroups
+              - ec2:DescribeSecurityGroupRules
               - ec2:AuthorizeSecurityGroupIngress
               - ec2:AuthorizeSecurityGroupEgress
               - ec2:RevokeSecurityGroupIngress
               - ec2:RevokeSecurityGroupEgress
-              - ec2:CreateTags
+              - ec2:UpdateSecurityGroupRuleDescriptionsIngress
+              - ec2:UpdateSecurityGroupRuleDescriptionsEgress
+              - ec2:GetSecurityGroupsForVpc
             Resource: "*"
 
           # ECS Fargate
@@ -134,6 +152,7 @@ Resources:
               - ecs:CreateCluster
               - ecs:DeleteCluster
               - ecs:DescribeClusters
+              - ecs:UpdateCluster
               - ecs:RegisterTaskDefinition
               - ecs:DeregisterTaskDefinition
               - ecs:DescribeTaskDefinition
@@ -143,6 +162,10 @@ Resources:
               - ecs:DescribeServices
               - ecs:ListServices
               - ecs:ListTasks
+              - ecs:DescribeTasks
+              - ecs:TagResource
+              - ecs:UntagResource
+              - ecs:ListTagsForResource
             Resource: "*"
 
           # Application Load Balancer
@@ -152,45 +175,97 @@ Resources:
               - elasticloadbalancing:CreateLoadBalancer
               - elasticloadbalancing:DeleteLoadBalancer
               - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:ModifyLoadBalancerAttributes
+              - elasticloadbalancing:DescribeLoadBalancerAttributes
               - elasticloadbalancing:CreateTargetGroup
               - elasticloadbalancing:DeleteTargetGroup
               - elasticloadbalancing:DescribeTargetGroups
+              - elasticloadbalancing:ModifyTargetGroupAttributes
+              - elasticloadbalancing:DescribeTargetGroupAttributes
               - elasticloadbalancing:CreateListener
               - elasticloadbalancing:DeleteListener
               - elasticloadbalancing:DescribeListeners
-              - elasticloadbalancing:ModifyLoadBalancerAttributes
-              - elasticloadbalancing:ModifyTargetGroupAttributes
+              - elasticloadbalancing:ModifyListener
               - elasticloadbalancing:AddTags
+              - elasticloadbalancing:RemoveTags
+              - elasticloadbalancing:DescribeTags
+              - elasticloadbalancing:RegisterTargets
+              - elasticloadbalancing:DeregisterTargets
+              - elasticloadbalancing:DescribeTargetHealth
+              - elasticloadbalancing:DescribeListenerAttributes
             Resource: "*"
 
-          # ECR
+          # ECR - Container Registry
           - Sid: ECRManagement
             Effect: Allow
             Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:DescribeImages
+              - ecr:DescribeRepositories
+              - ecr:ListImages
               - ecr:CreateRepository
               - ecr:DeleteRepository
-              - ecr:DescribeRepositories
-              - ecr:GetAuthorizationToken
               - ecr:PutImage
-              - ecr:BatchCheckLayerAvailability
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:ListTagsForResource
+              - ecr:TagResource
+              - ecr:UntagResource
             Resource: "*"
 
-          # IAM Role Management (for ECS tasks)
+          # IAM Role Management - Scoped to application roles
           - Sid: IAMRoleManagement
             Effect: Allow
             Action:
               - iam:CreateRole
               - iam:DeleteRole
               - iam:GetRole
+              - iam:UpdateRole
               - iam:AttachRolePolicy
               - iam:DetachRolePolicy
+              - iam:ListAttachedRolePolicies
+              - iam:ListRolePolicies
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:GetRolePolicy
               - iam:PassRole
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:ListRoleTags
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-ecs-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-task-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-execution-*"
+
+          # IAM Service-Linked Roles
+          - Sid: IAMServiceLinkedRoles
+            Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+              - iam:GetServiceLinkedRoleDeletionStatus
+            Resource:
+              - "arn:aws:iam::*:role/aws-service-role/elasticloadbalancing.amazonaws.com/*"
+              - "arn:aws:iam::*:role/aws-service-role/ecs.amazonaws.com/*"
+
+          # IAM Policy Management
+          - Sid: IAMPolicyManagement
+            Effect: Allow
+            Action:
               - iam:CreatePolicy
               - iam:DeletePolicy
               - iam:GetPolicy
+              - iam:GetPolicyVersion
+              - iam:ListPolicyVersions
+              - iam:CreatePolicyVersion
+              - iam:DeletePolicyVersion
             Resource:
-              - !Sub "arn:aws:iam::${AWS::AccountId}:role/sirpi-*"
-              - !Sub "arn:aws:iam::${AWS::AccountId}:policy/sirpi-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:policy/*-ecs-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:policy/*-task-*"
 
           # CloudWatch Logs
           - Sid: CloudWatchLogs
@@ -200,6 +275,11 @@ Resources:
               - logs:DeleteLogGroup
               - logs:DescribeLogGroups
               - logs:PutRetentionPolicy
+              - logs:TagResource
+              - logs:UntagResource
+              - logs:TagLogGroup
+              - logs:ListTagsForResource
+              - logs:ListTagsLogGroup
             Resource: "*"
 
           # S3 State Management

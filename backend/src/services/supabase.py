@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from typing import Optional, Dict, Any, List
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 
@@ -147,6 +147,7 @@ class SupabaseService:
         repository_url: str,
         template_type: str,
         status: str,
+        project_id: Optional[str] = None,
         files: Optional[List[Dict[str, Any]]] = None,
         s3_keys: Optional[List[str]] = None,
         project_context: Optional[Dict[str, Any]] = None,
@@ -159,8 +160,8 @@ class SupabaseService:
                         """
                         INSERT INTO generations 
                         (user_id, session_id, repository_url, template_type, status, 
-                         s3_keys, project_context, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                         project_id, s3_keys, project_context, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                         RETURNING id, created_at
                     """,
                         (
@@ -169,6 +170,7 @@ class SupabaseService:
                             repository_url,
                             template_type,
                             status,
+                            project_id,
                             Json(s3_keys or []),
                             Json(project_context or {}),
                         ),
@@ -195,32 +197,32 @@ class SupabaseService:
                 with conn.cursor() as cur:
                     update_fields = ["status = %s", "updated_at = NOW()"]
                     params = [status]
-                    
+
                     if s3_keys is not None:
                         update_fields.append("s3_keys = %s")
                         params.append(Json(s3_keys))
-                    
+
                     if files is not None:
                         update_fields.append("files = %s")
                         params.append(Json(files))
-                    
+
                     if project_context is not None:
                         update_fields.append("project_context = %s")
                         params.append(Json(project_context))
-                    
+
                     if error is not None:
                         update_fields.append("error = %s")
                         params.append(error)
-                    
+
                     params.append(session_id)
-                    
+
                     query = f"""
                         UPDATE generations
-                        SET {', '.join(update_fields)}
+                        SET {", ".join(update_fields)}
                         WHERE session_id = %s
                         RETURNING id
                     """
-                    
+
                     cur.execute(query, params)
 
                     result = cur.fetchone()
@@ -238,7 +240,11 @@ class SupabaseService:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT * FROM generations
+                        SELECT id, user_id, session_id, repository_url, template_type,
+                               status, s3_keys, project_context, error,
+                               pr_number, pr_url, pr_branch, pr_merged, pr_merged_at,
+                               created_at, updated_at
+                        FROM generations
                         WHERE session_id = %s
                     """,
                         (session_id,),
@@ -249,6 +255,32 @@ class SupabaseService:
             logger.error(f"Failed to get generation: {type(e).__name__}")
             raise DatabaseError("Failed to retrieve generation")
 
+    def get_generation_by_repository(
+        self, user_id: str, repository_url: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get the latest generation for a repository."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id, user_id, session_id, repository_url, template_type,
+                               status, s3_keys, project_context, error,
+                               pr_number, pr_url, pr_branch, pr_merged, pr_merged_at,
+                               created_at, updated_at
+                        FROM generations
+                        WHERE user_id = %s AND repository_url = %s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """,
+                        (user_id, repository_url),
+                    )
+
+                    return cur.fetchone()
+        except Exception as e:
+            logger.error(f"Failed to get repository generation: {type(e).__name__}")
+            raise DatabaseError("Failed to retrieve repository generation")
+
     def get_user_generations(
         self, user_id: str, limit: int = 50, offset: int = 0
     ) -> List[Dict[str, Any]]:
@@ -258,8 +290,9 @@ class SupabaseService:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT id, session_id, repository_url, template_type, 
-                               status, created_at, updated_at
+                        SELECT id, session_id, repository_url, template_type,
+                               status, pr_number, pr_url, pr_branch, pr_merged, pr_merged_at,
+                               created_at, updated_at
                         FROM generations
                         WHERE user_id = %s
                         ORDER BY created_at DESC
@@ -411,6 +444,324 @@ class SupabaseService:
             logger.error(f"Failed to deactivate installation: {type(e).__name__}")
             raise DatabaseError("Failed to deactivate installation")
 
+    def update_project_generation_status(
+        self, project_id: str, status: str, increment_count: bool = True
+    ) -> bool:
+        """
+        Update project's generation status and count.
+
+        Args:
+            project_id: Project UUID
+            status: New status (pending/generating/completed/failed/pr_created)
+            increment_count: Whether to increment generation_count
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    if increment_count:
+                        cur.execute(
+                            """
+                            UPDATE projects
+                            SET status = %s,
+                                generation_count = generation_count + 1,
+                                last_generated_at = NOW(),
+                                updated_at = NOW()
+                            WHERE id = %s
+                            RETURNING id
+                        """,
+                            (status, project_id),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE projects
+                            SET status = %s,
+                                updated_at = NOW()
+                            WHERE id = %s
+                            RETURNING id
+                        """,
+                            (status, project_id),
+                        )
+
+                    result = cur.fetchone()
+                    return bool(result)
+        except Exception as e:
+            logger.error(f"Failed to update project status: {type(e).__name__}")
+            raise DatabaseError("Failed to update project status")
+
+    def get_project_by_id(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Get project by ID."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT * FROM projects
+                        WHERE id = %s
+                    """,
+                        (project_id,),
+                    )
+                    return cur.fetchone()
+        except Exception as e:
+            logger.error(f"Failed to get project: {type(e).__name__}")
+            raise DatabaseError("Failed to retrieve project")
+
+    def get_generation_by_id(self, generation_id: str) -> Optional[Dict[str, Any]]:
+        """Get generation by ID."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT * FROM generations
+                        WHERE id = %s
+                    """,
+                        (generation_id,),
+                    )
+                    return cur.fetchone()
+        except Exception as e:
+            logger.error(f"Failed to get generation: {type(e).__name__}")
+            raise DatabaseError("Failed to retrieve generation")
+
+    def get_latest_generation_by_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Get latest generation for a project."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT * FROM generations
+                        WHERE project_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """,
+                        (project_id,),
+                    )
+                    return cur.fetchone()
+        except Exception as e:
+            logger.error(f"Failed to get latest generation: {type(e).__name__}")
+            raise DatabaseError("Failed to retrieve latest generation")
+
+    def update_generation_pr_info(
+        self, generation_id: str, pr_number: int, pr_url: str, pr_branch: str
+    ) -> bool:
+        """Update generation with PR information."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE generations
+                        SET pr_number = %s,
+                            pr_url = %s,
+                            pr_branch = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                        RETURNING id
+                    """,
+                        (pr_number, pr_url, pr_branch, generation_id),
+                    )
+                    result = cur.fetchone()
+                    return bool(result)
+        except Exception as e:
+            logger.error(f"Failed to update generation PR info: {type(e).__name__}")
+            raise DatabaseError("Failed to update generation PR info")
+
+    def save_aws_connection(
+        self, user_id: str, external_id: str, status: str = "pending"
+    ) -> Dict[str, Any]:
+        """
+        Save AWS connection setup for user.
+
+        Args:
+            user_id: User ID
+            external_id: Generated external ID for security
+            status: Connection status (pending, verified, failed)
+
+        Returns:
+            AWS connection record
+        """
+        try:
+            with self.get_session() as session:
+                # Check if connection already exists
+                existing = session.execute(
+                    text("SELECT * FROM aws_connections WHERE user_id = :user_id"),
+                    {"user_id": user_id},
+                ).fetchone()
+
+                if existing:
+                    # Update existing connection
+                    session.execute(
+                        text("""
+                        UPDATE aws_connections
+                        SET external_id = :external_id, status = :status, updated_at = NOW()
+                        WHERE user_id = :user_id
+                        """),
+                        {"user_id": user_id, "external_id": external_id, "status": status},
+                    )
+                else:
+                    # Create new connection
+                    session.execute(
+                        text("""
+                        INSERT INTO aws_connections (user_id, external_id, status)
+                        VALUES (:user_id, :external_id, :status)
+                        """),
+                        {"user_id": user_id, "external_id": external_id, "status": status},
+                    )
+
+                session.commit()
+
+                # Return the connection
+                result = session.execute(
+                    text("SELECT * FROM aws_connections WHERE user_id = :user_id"),
+                    {"user_id": user_id},
+                ).fetchone()
+
+                return dict(result._mapping) if result else None
+
+        except Exception as e:
+            logger.error(f"Failed to save AWS connection: {e}")
+            raise DatabaseError(f"Failed to save AWS connection: {str(e)}")
+
+    def get_aws_connection(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get AWS connection for user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            AWS connection record or None
+        """
+        try:
+            with self.get_session() as session:
+                result = session.execute(
+                    text("SELECT * FROM aws_connections WHERE user_id = :user_id"),
+                    {"user_id": user_id},
+                ).fetchone()
+
+                return dict(result._mapping) if result else None
+
+        except Exception as e:
+            logger.error(f"Failed to get AWS connection: {e}")
+            raise DatabaseError(f"Failed to get AWS connection: {str(e)}")
+
+    def update_aws_connection(
+        self, user_id: str, role_arn: str, status: str = "verified"
+    ) -> Dict[str, Any]:
+        """
+        Update AWS connection with role ARN and status.
+        Automatically extracts account ID from role ARN.
+
+        Args:
+            user_id: User ID
+            role_arn: AWS IAM role ARN (format: arn:aws:iam::ACCOUNT_ID:role/RoleName)
+            status: Connection status
+
+        Returns:
+            Updated AWS connection record
+        """
+        try:
+            # Extract account ID from role ARN
+            # Format: arn:aws:iam::353114555842:role/SirpiInfrastructureAutomationRole
+            account_id = None
+            if role_arn:
+                parts = role_arn.split(":")
+                if len(parts) >= 5:
+                    account_id = parts[4]  # The account ID is the 5th part
+                    logger.info(f"Extracted account ID: {account_id} from role ARN")
+            
+            with self.get_session() as session:
+                # Update connection with role_arn, account_id, and status
+                session.execute(
+                    text("""
+                    UPDATE aws_connections
+                    SET role_arn = :role_arn, 
+                        account_id = :account_id,
+                        status = :status, 
+                        verified_at = CASE WHEN :status = 'verified' THEN NOW() ELSE verified_at END,
+                        updated_at = NOW()
+                    WHERE user_id = :user_id
+                    """),
+                    {
+                        "user_id": user_id, 
+                        "role_arn": role_arn, 
+                        "account_id": account_id,
+                        "status": status
+                    },
+                )
+
+                session.commit()
+
+                # Return updated connection
+                result = session.execute(
+                    text("SELECT * FROM aws_connections WHERE user_id = :user_id"),
+                    {"user_id": user_id},
+                ).fetchone()
+
+                return dict(result._mapping) if result else None
+
+        except Exception as e:
+            logger.error(f"Failed to update AWS connection: {e}")
+            raise DatabaseError(f"Failed to update AWS connection: {str(e)}")
+
+    def get_aws_connection_by_id(self, connection_id: str) -> Optional[Dict[str, Any]]:
+        """Get AWS connection by ID."""
+        try:
+            with self.get_session() as session:
+                result = session.execute(
+                    text("SELECT * FROM aws_connections WHERE id = :connection_id"),
+                    {"connection_id": connection_id},
+                )
+                connection = result.fetchone()
+                return dict(connection._mapping) if connection else None
+
+        except Exception as e:
+            logger.error(f"Failed to get AWS connection by ID: {e}")
+            raise DatabaseError(f"Failed to get AWS connection: {str(e)}")
+
+    def update_project_deployment_status(
+        self, project_id: str, status: str, error: Optional[str] = None
+    ) -> bool:
+        """Update project deployment status."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    if error:
+                        cur.execute(
+                            """
+                            UPDATE projects
+                            SET deployment_status = %s,
+                                deployment_error = %s,
+                                updated_at = NOW()
+                            WHERE id = %s
+                            RETURNING id
+                            """,
+                            (status, error, project_id),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE projects
+                            SET deployment_status = %s,
+                                deployment_completed_at = CASE WHEN %s = 'deployed' THEN NOW() ELSE deployment_completed_at END,
+                                updated_at = NOW()
+                            WHERE id = %s
+                            RETURNING id
+                            """,
+                            (status, status, project_id),
+                        )
+                    result = cur.fetchone()
+                    return bool(result)
+        except Exception as e:
+            logger.error(f"Failed to update project deployment status: {type(e).__name__}")
+            raise DatabaseError("Failed to update deployment status")
+
 
 # Global singleton instance
 supabase = SupabaseService()
+
+
+def get_supabase_service() -> SupabaseService:
+    """Get Supabase service instance."""
+    return supabase

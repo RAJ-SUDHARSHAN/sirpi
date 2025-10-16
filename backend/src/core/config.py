@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     supabase_dbname: str = "postgres"
 
     aws_region: str = "us-west-2"
+    aws_account_id: str
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
 
@@ -38,6 +39,11 @@ class Settings(BaseSettings):
     agentcore_context_analyzer_agent_id: str | None = None
     agentcore_dockerfile_generator_agent_id: str | None = None
     agentcore_terraform_generator_agent_id: str | None = None
+
+    # Agent Alias IDs (optional, defaults to TSTALIASID)
+    agentcore_context_analyzer_alias_id: str = "TSTALIASID"
+    agentcore_dockerfile_generator_alias_id: str = "TSTALIASID"
+    agentcore_terraform_generator_alias_id: str = "TSTALIASID"
 
     dynamodb_sessions_table: str = "sirpi-sessions"
     dynamodb_logs_table: str = "sirpi-logs"
@@ -53,10 +59,20 @@ class Settings(BaseSettings):
     github_app_private_key_path: str = "./github-app-private-key.pem"
     github_app_webhook_secret: str
     github_app_name: str = "raj-sirpi"
+    github_webhook_secret: str | None = None  # Optional: For PR merge webhooks
 
     # GitHub URLs
     github_base_url: str = "https://github.com"
     github_api_base_url: str = "https://api.github.com"
+
+    # CloudFormation Template URL
+    cloudformation_template_url: str = (
+        "https://sirpi-generated-files.s3.us-west-2.amazonaws.com/cloudformation/sirpi-setup.yaml"
+    )
+    aws_region: str = "us-west-2"
+    
+    # E2B API Key for sandbox execution
+    e2b_api_key: str
 
     @property
     def cors_origins_list(self) -> List[str]:

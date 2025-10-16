@@ -72,7 +72,7 @@ export default function ImportRepoPage() {
         } else {
           router.push(`/${userProjects}/import`);
         }
-      } catch (error) {
+      } catch {
         router.push(`/${userProjects}/import`);
       } finally {
         setIsLoading(false);
@@ -116,7 +116,7 @@ export default function ImportRepoPage() {
         });
         setIsImporting(false);
       }
-    } catch (error) {
+    } catch {
       setNotification({
         show: true,
         type: "error",

@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useParams, useRouter } from "next/navigation";
+import { apiCall } from "@/lib/api-client";
 import {
   GitHubIcon,
   ExternalLinkIcon,
@@ -18,7 +19,6 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   XCircleIcon,
-  DownloadIcon,
 } from "@/components/ui/icons";
 import {
   Project,
@@ -27,14 +27,20 @@ import {
 } from "@/lib/api/projects";
 import { workflowApi } from "@/lib/api/workflow";
 import { githubApi } from "@/lib/api/github";
+import { pullRequestsApi } from "@/lib/api/pull-requests";
 import { downloadFilesAsZip } from "@/lib/utils/download";
-import { getGitHubRepositoryUrl } from "@/lib/config/github";
+import FilePreviewTabs from "@/components/FilePreviewTabs";
+import ProgressPipeline from "@/components/ProgressPipeline";
+import NextStepsGuide from "@/components/NextStepsGuide";
+import AWSSetupFlow from "@/components/AWSSetupFlow";
+import toast from "react-hot-toast";
 
 const INFRASTRUCTURE_TEMPLATES = [
   {
     id: "ecs-fargate",
     name: "ECS Fargate",
-    description: "Serverless container deployment with auto-scaling and load balancer",
+    description:
+      "Serverless container deployment with auto-scaling and load balancer",
     provider: "AWS",
     features: ["Auto-scaling", "Load Balancer", "Container Registry", "VPC"],
     recommended: true,
@@ -57,7 +63,13 @@ const INFRASTRUCTURE_TEMPLATES = [
   },
 ];
 
-type WorkflowStatus = "not_started" | "started" | "analyzing" | "generating" | "completed" | "failed";
+type WorkflowStatus =
+  | "not_started"
+  | "started"
+  | "analyzing"
+  | "generating"
+  | "completed"
+  | "failed";
 
 interface WorkflowFile {
   filename: string;
@@ -92,6 +104,7 @@ export default function ProjectPage() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRestoringState, setIsRestoringState] = useState(false);
   const [installationId, setInstallationId] = useState<number | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState("ecs-fargate");
   const [workflowState, setWorkflowState] = useState<WorkflowState>({
@@ -103,8 +116,25 @@ export default function ProjectPage() {
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
   const [eventSource, setEventSource] = useState<EventSource | null>(null);
+  const [isCreatingPR, setIsCreatingPR] = useState(false);
+  const [showAWSSetup, setShowAWSSetup] = useState(false);
+  const [prInfo, setPrInfo] = useState<{
+    pr_number: number;
+    pr_url: string;
+    branch: string;
+  } | null>(null);
+  const [generationId, setGenerationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      workflowState.status === "analyzing" ||
+      workflowState.status === "generating" ||
+      workflowState.status === "started"
+    ) {
+      setShowLogs(true);
+    }
+  }, [workflowState.status]);
 
   useEffect(() => {
     if (showLogs && logsEndRef.current) {
@@ -114,6 +144,7 @@ export default function ProjectPage() {
 
   useEffect(() => {
     if (user) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const expectedNamespace = getUserProjectNamespace(user as any);
       if (userProjects !== expectedNamespace) {
         router.replace(`/${expectedNamespace}/${projectSlug}`);
@@ -126,28 +157,31 @@ export default function ProjectPage() {
     async function loadProject() {
       try {
         setIsLoading(true);
-        
+
         const [overview, installation] = await Promise.all([
           projectsApi.getUserOverview(),
-          githubApi.getInstallation()
+          githubApi.getInstallation(),
         ]);
-        
+
         if (installation) {
           setInstallationId(installation.installation_id);
         }
-        
+
         if (overview) {
-          const foundProject = (overview as any).projects.items.find(
-            (p: Project) => p.slug === projectSlug
-          );
+          const foundProject = (
+            overview as { projects: { items: Project[] } }
+          ).projects.items.find((p: Project) => p.slug === projectSlug);
 
           if (foundProject) {
             setProject(foundProject);
+
+            // Try to restore previous generation state
+            await restoreGenerationState(foundProject.id);
           } else {
             router.push(`/${userProjects}`);
           }
         }
-      } catch (error) {
+      } catch {
         router.push(`/${userProjects}`);
       } finally {
         setIsLoading(false);
@@ -159,6 +193,112 @@ export default function ProjectPage() {
     }
   }, [user, projectSlug, userProjects, router]);
 
+  const restoreGenerationState = async (projectId: string) => {
+    try {
+      setIsRestoringState(true);
+
+      // Fetch both generation and project data to get complete state
+      const [generation, projectData] = await Promise.all([
+        workflowApi.getGenerationByProject(projectId),
+        projectsApi.getProjectById(projectId),
+      ]);
+
+      if (!projectData) {
+        setIsRestoringState(false);
+        return; // Project not found
+      }
+
+      // Update project state with latest data
+      setProject(projectData);
+
+      if (generation) {
+        // Store generation ID for PR creation  
+        setGenerationId(generation.id);
+
+        // Restore PR info if exists
+        if (generation.pr_number && generation.pr_url && generation.pr_branch) {
+          setPrInfo({
+            pr_number: generation.pr_number,
+            pr_url: generation.pr_url,
+            branch: generation.pr_branch,
+          });
+        }
+
+        // Restore state based on generation status
+        if (generation.status === "completed") {
+          const restoredFiles = Array.isArray(generation.files)
+            ? generation.files
+            : [];
+
+          setWorkflowState((prev) => ({
+            ...prev,
+            status: "completed",
+            message: "Infrastructure generated successfully!",
+            progress: 100,
+            logs: [],
+            files: restoredFiles,
+          }));
+        } else if (generation.status === "failed") {
+          setWorkflowState((prev) => ({
+            ...prev,
+            status: "failed",
+            message: "Previous generation failed",
+            progress: 0,
+            logs: [],
+            files: [],
+            error: generation.error,
+          }));
+        } else {
+          // In progress or other status - show as not started but preserve project deployment status
+          setWorkflowState((prev) => ({
+            ...prev,
+            status: "not_started",
+            message: "Ready to generate infrastructure",
+            progress: 0,
+            logs: [],
+            files: [],
+          }));
+        }
+      } else if (
+        projectData.deployment_status === "pr_created" ||
+        projectData.status === "pr_created"
+      ) {
+        // No generation found but project indicates PR was created
+        // This means files were generated and PR was created, but generation record might be missing
+        setWorkflowState((prev) => ({
+          ...prev,
+          status: "completed",
+          message: "Infrastructure files generated and PR created!",
+          progress: 100,
+          logs: [],
+          files: [], // Files might need to be regenerated
+        }));
+      } else {
+        // No previous generation and no PR created
+        setWorkflowState((prev) => ({
+          ...prev,
+          status: "not_started",
+          message: "Ready to generate infrastructure",
+          progress: 0,
+          logs: [],
+          files: [],
+        }));
+      }
+    } catch (error) {
+      // Ensure we don't leave in loading state on error
+      setWorkflowState((prev) => ({
+        ...prev,
+        status: "not_started",
+        message: "Ready to generate infrastructure",
+        progress: 0,
+        logs: [],
+        files: [],
+      }));
+    } finally {
+      setIsRestoringState(false);
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (eventSource) {
@@ -169,21 +309,14 @@ export default function ProjectPage() {
 
   const handleStartGeneration = async () => {
     if (!project || !installationId) {
-      setWorkflowState(prev => ({
+      setWorkflowState((prev) => ({
         ...prev,
-        status: 'failed',
-        message: 'Missing GitHub installation',
-        error: 'Please reconnect your GitHub account'
+        status: "failed",
+        message: "Missing GitHub installation",
+        error: "Please reconnect your GitHub account",
       }));
       return;
     }
-
-    console.log('Project data:', project);
-    console.log('Sending workflow request:', {
-      repository_url: project.repository_url,
-      installation_id: installationId,
-      template_type: selectedTemplate
-    });
 
     setIsGenerating(true);
     setShowLogs(true);
@@ -199,24 +332,23 @@ export default function ProjectPage() {
       const response = await workflowApi.startWorkflow({
         repository_url: project.repository_url,
         installation_id: installationId,
-        template_type: selectedTemplate as any,
+        template_type: selectedTemplate as "ecs-fargate" | "ec2" | "lambda",
+        project_id: project.id,
       });
-      
-      console.log('Workflow started:', response);
 
       const es = workflowApi.openWorkflowStream(response.session_id);
       setEventSource(es);
 
-      es.addEventListener('status', (event) => {
+      es.addEventListener("status", (event) => {
         const data = JSON.parse(event.data);
-        setWorkflowState(prev => ({
+        setWorkflowState((prev) => ({
           ...prev,
           status: data.status,
-          message: data.message
+          message: data.message,
         }));
       });
 
-      es.addEventListener('log', (event) => {
+      es.addEventListener("log", (event) => {
         const log = JSON.parse(event.data);
         setWorkflowState((prev) => ({
           ...prev,
@@ -225,65 +357,248 @@ export default function ProjectPage() {
         }));
       });
 
-      es.addEventListener('complete', (event) => {
+      es.addEventListener("complete", async (event) => {
         const data = JSON.parse(event.data);
         setWorkflowState((prev) => ({
           ...prev,
-          status: data.status === 'completed' ? 'completed' : 'failed',
-          message: data.status === 'completed' 
-            ? 'Infrastructure generated successfully!' 
-            : 'Generation failed',
+          status: data.status === "completed" ? "completed" : "failed",
+          message:
+            data.status === "completed"
+              ? "Infrastructure generated successfully!"
+              : "Generation failed",
           progress: 100,
           files: data.files || [],
           error: data.error,
         }));
         setIsGenerating(false);
-        setShowFiles(true);
         es.close();
+
+        // Fetch generation ID after completion
+        if (data.status === "completed" && project) {
+          try {
+            const generation = await workflowApi.getGenerationByProject(
+              project.id
+            );
+            if (generation && generation.id) {
+              setGenerationId(generation.id);
+            }
+          } catch (error) {
+            // Silently continue if fetch fails
+          }
+        }
       });
 
       es.onerror = () => {
         setWorkflowState((prev) => ({
           ...prev,
-          status: 'failed',
-          message: 'Connection error',
-          error: 'Lost connection to server',
+          status: "failed",
+          message: "Connection error",
+          error: "Lost connection to server",
         }));
         setIsGenerating(false);
         es.close();
       };
-
     } catch (error) {
       setWorkflowState({
-        status: 'failed',
-        message: 'Failed to start generation',
+        status: "failed",
+        message: "Failed to start generation",
         progress: 0,
         logs: [],
         files: [],
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : "Unknown error",
       });
       setIsGenerating(false);
     }
   };
 
+  const getErrorGuidance = (error: string | undefined) => {
+    if (!error) return null;
+
+    if (error.includes("timeout") || error.includes("Timeout")) {
+      return {
+        cause: "Repository analysis timed out",
+        suggestion: "Repository might be too large or complex",
+        action: "Try with a smaller repository or contact support",
+      };
+    }
+
+    if (error.includes("GitHub") || error.includes("installation")) {
+      return {
+        cause: "GitHub connection issue",
+        suggestion: "Your GitHub App installation may need to be refreshed",
+        action: "Reconnect your GitHub account",
+      };
+    }
+
+    if (error.includes("Bedrock") || error.includes("Agent")) {
+      return {
+        cause: "AI agent processing error",
+        suggestion: "Temporary service issue with Bedrock",
+        action: "Please retry in a few moments",
+      };
+    }
+
+    return {
+      cause: "Generation failed",
+      suggestion: error,
+      action: "Try again or contact support if issue persists",
+    };
+  };
+
   const getProgressForAgent = (agent: string): number => {
     const progressMap: Record<string, number> = {
-      'orchestrator': 10,
-      'github_analyzer': 25,
-      'context_analyzer': 50,
-      'dockerfile_generator': 75,
-      'terraform_generator': 90,
+      orchestrator: 10,
+      github_analyzer: 25,
+      context_analyzer: 50,
+      dockerfile_generator: 75,
+      terraform_generator: 90,
     };
     return progressMap[agent] || 50;
   };
 
   const handleDownloadZip = async () => {
-    if (workflowState.files.length === 0) return;
+    if (!workflowState.files || workflowState.files.length === 0) return;
 
     await downloadFilesAsZip(
       workflowState.files,
-      `${project?.name || 'infrastructure'}-files.zip`
+      `${project?.name || "infrastructure"}-files.zip`
     );
+  };
+
+  const handleCreatePR = async () => {
+    if (!project) {
+      toast.error("Cannot create PR: Project not found");
+      return;
+    }
+
+    if (!generationId) {
+      toast.error(
+        "Cannot create PR: No generation ID found. Please regenerate infrastructure."
+      );
+      return;
+    }
+
+    // Check if PR already exists by fetching current project data
+    try {
+      const currentProject = await projectsApi.getProjectById(project.id);
+      if (currentProject?.deployment_status === "pr_created") {
+        // PR already exists or deployment has started, just open it
+        if (prInfo) {
+          window.open(prInfo.pr_url, "_blank");
+          return;
+        }
+      }
+    } catch (error) {
+      // Silently continue if check fails
+    }
+
+    if (prInfo) {
+      // PR already exists, open it
+      window.open(prInfo.pr_url, "_blank");
+      return;
+    }
+
+    try {
+      setIsCreatingPR(true);
+      toast.loading("Creating pull request...", { id: "create-pr" });
+
+      const result = await pullRequestsApi.createPR({
+        project_id: project.id,
+        generation_id: generationId,
+        base_branch: "main",
+      });
+
+      setPrInfo({
+        pr_number: result.pr_number,
+        pr_url: result.pr_url,
+        branch: result.branch,
+      });
+
+      // Refetch project data to get updated deployment_status
+      try {
+        const updatedProject = await projectsApi.getProjectById(project.id);
+        if (updatedProject) {
+          setProject(updatedProject);
+        }
+      } catch (error) {
+        // Silently continue if refetch fails
+      }
+
+      toast.success(`Pull request #${result.pr_number} created successfully!`, {
+        id: "create-pr",
+        duration: 5000,
+      });
+
+      if (result.validation_warnings.length > 0) {
+        toast(`Note: ${result.validation_warnings.length} warnings detected`, {
+          icon: "⚠️",
+          duration: 4000,
+        });
+      }
+
+      // Open PR in new tab
+      window.open(result.pr_url, "_blank");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to create pull request",
+        { id: "create-pr" }
+      );
+    } finally {
+      setIsCreatingPR(false);
+    }
+  };
+
+  const handleDeploy = () => {
+    if (!project || !generationId) {
+      toast.error("Cannot deploy: Missing project or generation data");
+      return;
+    }
+
+    // Navigate to the dedicated deploy page for real-time logs
+    router.push(`/${params.userProjects}/${params.projectSlug}/deploy`);
+  };
+
+  const handleSetupAWS = () => {
+    setShowAWSSetup(true);
+  };
+
+  const handleAWSSetupComplete = async (roleArn: string) => {
+    setShowAWSSetup(false);
+
+    try {
+      // Update project status to aws_verified
+      if (project?.id) {
+        const response = await apiCall(`/projects/${project.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            deployment_status: "aws_verified",
+            aws_role_arn: roleArn,
+          }),
+        });
+
+        if (response.ok) {
+          // Refetch project data to ensure we have the latest deployment_status
+          try {
+            const updatedProject = await projectsApi.getProjectById(project.id);
+            if (updatedProject) {
+              setProject(updatedProject);
+            }
+          } catch (error) {
+            // Still update local state as fallback
+            setProject((prev) =>
+              prev ? { ...prev, deployment_status: "aws_verified" } : null
+            );
+          }
+          toast.success("AWS account connected successfully!");
+        } else {
+          toast.error("Failed to update project status");
+        }
+      }
+    } catch (error) {
+      toast.error("Failed to update project status");
+    }
   };
 
   const getStatusIcon = (status: WorkflowStatus) => {
@@ -303,10 +618,15 @@ export default function ProjectPage() {
     }
   };
 
-  if (!user || isLoading) {
+  if (!user || isLoading || isRestoringState) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white" />
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white" />
+          {isRestoringState && (
+            <p className="text-gray-400">Restoring previous state...</p>
+          )}
+        </div>
       </div>
     );
   }
@@ -373,23 +693,25 @@ export default function ProjectPage() {
           )}
         </div>
 
-        {workflowState.status !== 'not_started' && (
+        {workflowState.status !== "not_started" && (
           <div className="mb-8 bg-black border border-gray-800 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 {getStatusIcon(workflowState.status)}
                 <span className="font-medium">{workflowState.message}</span>
               </div>
-              <span className="text-sm text-gray-400">{workflowState.progress}%</span>
+              <span className="text-sm text-gray-400">
+                {workflowState.progress}%
+              </span>
             </div>
             <div className="w-full bg-gray-800 rounded-full h-2">
               <div
                 className={`h-2 rounded-full transition-all duration-500 ${
-                  workflowState.status === 'failed'
-                    ? 'bg-red-500'
-                    : workflowState.status === 'completed'
-                    ? 'bg-green-500'
-                    : 'bg-blue-500'
+                  workflowState.status === "failed"
+                    ? "bg-red-500"
+                    : workflowState.status === "completed"
+                    ? "bg-green-500"
+                    : "bg-blue-500"
                 }`}
                 style={{ width: `${workflowState.progress}%` }}
               />
@@ -399,7 +721,7 @@ export default function ProjectPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-8">
-            {workflowState.status === 'not_started' && (
+            {workflowState.status === "not_started" && (
               <div className="bg-black border border-gray-800 rounded-lg p-8">
                 <h2 className="text-xl font-semibold mb-3">
                   Choose Infrastructure Template
@@ -414,15 +736,17 @@ export default function ProjectPage() {
                       key={template.id}
                       className={`p-6 rounded-lg cursor-pointer transition-all border ${
                         selectedTemplate === template.id
-                          ? 'bg-gray-900 border-blue-500'
-                          : 'bg-gray-900/50 border-gray-700 hover:border-gray-600'
+                          ? "bg-gray-900 border-blue-500"
+                          : "bg-gray-900/50 border-gray-700 hover:border-gray-600"
                       }`}
                       onClick={() => setSelectedTemplate(template.id)}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
-                            <h3 className="text-lg font-medium">{template.name}</h3>
+                            <h3 className="text-lg font-medium">
+                              {template.name}
+                            </h3>
                             {template.recommended && (
                               <span className="px-3 py-1 bg-blue-600 text-white text-xs rounded-full">
                                 Recommended
@@ -433,7 +757,7 @@ export default function ProjectPage() {
                             {template.description}
                           </p>
                           <div className="flex flex-wrap gap-2">
-                            {template.features.map((feature) => (
+                            {(template.features || []).map((feature) => (
                               <span
                                 key={feature}
                                 className="px-3 py-1 bg-gray-800 text-gray-300 text-xs rounded"
@@ -446,8 +770,8 @@ export default function ProjectPage() {
                         <div
                           className={`w-5 h-5 rounded-full border-2 ${
                             selectedTemplate === template.id
-                              ? 'bg-blue-500 border-blue-500'
-                              : 'border-gray-600'
+                              ? "bg-blue-500 border-blue-500"
+                              : "border-gray-600"
                           }`}
                         />
                       </div>
@@ -475,32 +799,98 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {workflowState.status === 'failed' && (
+            {(workflowState.status === "started" ||
+              workflowState.status === "analyzing" ||
+              workflowState.status === "generating") && (
+              <ProgressPipeline
+                workflowStatus={workflowState.status}
+                currentMessage={workflowState.message}
+              />
+            )}
+
+            {workflowState.status === "failed" && (
               <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-6">
-                <p className="text-red-400 mb-4">
-                  {workflowState.error || 'Generation failed. Please try again.'}
-                </p>
-                <button
-                  onClick={() => {
-                    setWorkflowState({
-                      status: 'not_started',
-                      message: 'Ready to generate infrastructure',
-                      progress: 0,
-                      logs: [],
-                      files: [],
-                    });
-                    setShowLogs(false);
-                    setShowFiles(false);
-                  }}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
-                >
-                  <RefreshIcon className="w-4 h-4" />
-                  <span>Try Again</span>
-                </button>
+                <div className="flex items-center gap-3 mb-4">
+                  <XCircleIcon className="w-6 h-6 text-red-400" />
+                  <h3 className="text-lg font-medium text-red-400">
+                    Generation Failed
+                  </h3>
+                </div>
+
+                {(() => {
+                  const guidance = getErrorGuidance(workflowState.error);
+                  return guidance ? (
+                    <div className="space-y-4">
+                      <div className="bg-red-900/20 border border-red-500/20 rounded p-4">
+                        <p className="text-sm text-red-200 mb-2">
+                          <strong className="text-red-300">Problem:</strong>{" "}
+                          {guidance.cause}
+                        </p>
+                        <p className="text-sm text-red-200 mb-2">
+                          <strong className="text-red-300">Details:</strong>{" "}
+                          {guidance.suggestion}
+                        </p>
+                        <p className="text-sm text-red-200">
+                          <strong className="text-red-300">Action:</strong>{" "}
+                          {guidance.action}
+                        </p>
+                      </div>
+
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => {
+                            setWorkflowState({
+                              status: "not_started",
+                              message: "Ready to generate infrastructure",
+                              progress: 0,
+                              logs: [],
+                              files: [],
+                            });
+                            setShowLogs(false);
+                          }}
+                          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+                        >
+                          <RefreshIcon className="w-4 h-4" />
+                          <span>Try Again</span>
+                        </button>
+                        <a
+                          href="https://github.com/your-repo/sirpi/issues/new"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-4 py-2 border border-red-500 text-red-400 rounded-lg hover:bg-red-900/20"
+                        >
+                          Report Issue
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-red-400 mb-4">
+                        {workflowState.error || "An unexpected error occurred"}
+                      </p>
+                      <button
+                        onClick={() => {
+                          setWorkflowState({
+                            status: "not_started",
+                            message: "Ready to generate infrastructure",
+                            progress: 0,
+                            logs: [],
+                            files: [],
+                          });
+                          setShowLogs(false);
+                        }}
+                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+                      >
+                        <RefreshIcon className="w-4 h-4" />
+                        <span>Try Again</span>
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
-            {workflowState.logs.length > 0 && (
+            {workflowState.logs && workflowState.logs.length > 0 && (
               <div className="bg-black border border-gray-800 rounded-lg overflow-hidden">
                 <button
                   onClick={() => setShowLogs(!showLogs)}
@@ -508,34 +898,53 @@ export default function ProjectPage() {
                 >
                   <h3 className="text-lg font-medium flex items-center gap-3">
                     <span>🤖</span>
-                    <span>AI Agent Logs ({workflowState.logs.length})</span>
+                    <span>
+                      AI Agent Logs ({(workflowState.logs || []).length})
+                    </span>
                   </h3>
                   <ChevronDownIcon
                     className={`w-5 h-5 text-gray-400 transition-transform ${
-                      showLogs ? 'rotate-180' : ''
+                      showLogs ? "rotate-180" : ""
                     }`}
                   />
                 </button>
 
                 {showLogs && (
                   <div className="px-4 py-4 bg-black max-h-96 overflow-y-auto font-mono text-sm">
-                    {workflowState.logs.map((log, idx) => (
-                      <div key={idx} className="flex items-start gap-3 mb-2 text-gray-300">
+                    {(workflowState.logs || []).map((log, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-start gap-3 mb-2 text-gray-300"
+                      >
                         <span className="text-gray-500 text-xs min-w-[80px]">
                           {new Date(log.timestamp).toLocaleTimeString()}
                         </span>
                         <span
-                          className={`text-xs uppercase font-semibold min-w-[100px] ${
-                            log.level === 'ERROR'
-                              ? 'text-red-400'
-                              : log.agent === 'orchestrator'
-                              ? 'text-blue-400'
-                              : 'text-yellow-400'
+                          className={`text-xs uppercase font-semibold min-w-[120px] ${
+                            log.level === "ERROR"
+                              ? "text-red-400"
+                              : log.level === "THINKING"
+                              ? "text-green-400"
+                              : log.level === "SYSTEM"
+                              ? "text-gray-500"
+                              : log.agent === "orchestrator"
+                              ? "text-blue-400"
+                              : "text-yellow-400"
                           }`}
                         >
-                          [{log.agent}]
+                          {log.level === "SYSTEM"
+                            ? `[${log.agent}]`
+                            : `[${log.agent}]`}
                         </span>
-                        <span className="text-gray-300 flex-1">{log.message}</span>
+                        <span
+                          className={`flex-1 ${
+                            log.level === "THINKING"
+                              ? "text-green-300 italic"
+                              : "text-gray-300"
+                          }`}
+                        >
+                          {log.message}
+                        </span>
                       </div>
                     ))}
                     <div ref={logsEndRef} />
@@ -544,80 +953,57 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {workflowState.files.length > 0 && (
-              <div className="bg-black border border-gray-800 rounded-lg">
-                <div className="p-6 flex items-center justify-between border-b border-gray-800">
-                  <h3 className="text-lg font-medium flex items-center gap-3">
-                    <span>📁</span>
-                    <span>Generated Files ({workflowState.files.length})</span>
-                  </h3>
-                  <button
-                    onClick={handleDownloadZip}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                  >
-                    <DownloadIcon className="w-4 h-4" />
-                    <span>Download ZIP</span>
-                  </button>
-                </div>
-
-                <div className="p-6 space-y-3">
-                  {workflowState.files.map((file) => (
-                    <div
-                      key={file.filename}
-                      className="border border-gray-700 rounded-lg overflow-hidden"
-                    >
-                      <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-700">
-                        <span className="text-blue-400 font-mono text-sm font-medium">
-                          {file.filename}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {file.content.length} chars
-                        </span>
-                      </div>
-                      <div className="bg-black p-4">
-                        <pre className="text-xs text-gray-300 font-mono overflow-x-auto max-h-64 overflow-y-auto">
-                          {file.content}
-                        </pre>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {workflowState.files && workflowState.files.length > 0 && (
+              <FilePreviewTabs
+                files={workflowState.files || []}
+                onDownloadAll={handleDownloadZip}
+              />
             )}
 
-            {workflowState.status === 'completed' && (
-              <div className="bg-black border border-gray-800 rounded-lg p-6">
-                <h2 className="text-lg font-medium mb-4">Next Steps</h2>
-                <div className="space-y-4">
-                  {[
-                    {
-                      step: "1",
-                      title: "Download Infrastructure Files",
-                      description: "Get your Dockerfile and Terraform configuration",
-                    },
-                    {
-                      step: "2",
-                      title: "Review Generated Code",
-                      description: "Examine the infrastructure files and make any adjustments",
-                    },
-                    {
-                      step: "3",
-                      title: "Deploy to AWS",
-                      description: "Use the Deploy section below to launch your infrastructure",
-                    },
-                  ].map((item) => (
-                    <div key={item.step} className="flex items-start gap-4">
-                      <span className="flex-shrink-0 w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center text-sm font-bold">
-                        {item.step}
-                      </span>
-                      <div>
-                        <p className="font-medium">{item.title}</p>
-                        <p className="text-gray-400 text-sm">{item.description}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {(workflowState.status === "completed" ||
+              workflowState.files?.length > 0) && (
+              <NextStepsGuide
+                projectName={project?.name || "infrastructure"}
+                onCreatePR={
+                  workflowState.status === "completed" &&
+                  !prInfo?.pr_url &&
+                  !isCreatingPR
+                    ? handleCreatePR
+                    : undefined
+                }
+                onDeploy={
+                  (project?.deployment_status === "aws_verified" ||
+                    project?.deployment_status === "planned" ||
+                    project?.deployment_status === "pr_created" ||
+                    project?.deployment_status === "pr_merged" ||
+                    project?.deployment_status === "ready_for_deployment") &&
+                  !isCreatingPR &&
+                  generationId
+                    ? handleDeploy
+                    : undefined
+                }
+                onSetupAWS={
+                  !project?.deployment_status ||
+                  project?.deployment_status === "not_deployed" ||
+                  project?.deployment_status === "pr_created" ||
+                  project?.deployment_status === "pr_merged" ||
+                  project?.deployment_status === "ready_for_deployment" ||
+                  project?.deployment_status === "aws_verified" ||
+                  project?.deployment_status === "planned"
+                    ? handleSetupAWS
+                    : undefined
+                }
+                isCreatingPR={isCreatingPR}
+                prUrl={prInfo?.pr_url || null}
+                prCreated={
+                  !!prInfo?.pr_url ||
+                  project?.status === "pr_created" ||
+                  project?.deployment_status === "ready_for_deployment"
+                }
+                projectStatus={project?.status || "pending"}
+                deploymentStatus={project?.deployment_status || "not_deployed"}
+                deploymentError={project?.deployment_error || null}
+              />
             )}
           </div>
 
@@ -627,7 +1013,9 @@ export default function ProjectPage() {
               <div className="space-y-4">
                 <div>
                   <p className="text-sm text-gray-400 mb-1">Status</p>
-                  <p className="capitalize">{workflowState.status.replace('_', ' ')}</p>
+                  <p className="capitalize">
+                    {workflowState.status.replace("_", " ")}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-400 mb-1">Language</p>
@@ -636,8 +1024,9 @@ export default function ProjectPage() {
                 <div>
                   <p className="text-sm text-gray-400 mb-1">Template</p>
                   <p>
-                    {INFRASTRUCTURE_TEMPLATES.find((t) => t.id === selectedTemplate)
-                      ?.name || "ECS Fargate"}
+                    {INFRASTRUCTURE_TEMPLATES.find(
+                      (t) => t.id === selectedTemplate
+                    )?.name || "ECS Fargate"}
                   </p>
                 </div>
                 <div>
@@ -657,14 +1046,21 @@ export default function ProjectPage() {
                   return template ? (
                     <div className="space-y-4">
                       <h4 className="font-medium">{template.name}</h4>
-                      <p className="text-gray-400 text-sm">{template.description}</p>
+                      <p className="text-gray-400 text-sm">
+                        {template.description}
+                      </p>
                       <div>
                         <p className="text-sm text-gray-400 mb-3">Features:</p>
                         <div className="space-y-2">
-                          {template.features.map((feature) => (
-                            <div key={feature} className="flex items-center gap-2">
+                          {(template.features || []).map((feature) => (
+                            <div
+                              key={feature}
+                              className="flex items-center gap-2"
+                            >
                               <CheckCircleIcon className="w-4 h-4 text-green-500" />
-                              <span className="text-sm text-gray-300">{feature}</span>
+                              <span className="text-sm text-gray-300">
+                                {feature}
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -677,6 +1073,13 @@ export default function ProjectPage() {
           </div>
         </div>
       </div>
+
+      <AWSSetupFlow
+        isVisible={showAWSSetup}
+        onComplete={handleAWSSetupComplete}
+        onClose={() => setShowAWSSetup(false)}
+        projectId={project?.id}
+      />
     </div>
   );
 }

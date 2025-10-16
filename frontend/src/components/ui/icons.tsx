@@ -357,3 +357,59 @@ export function DownloadIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function CopyIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      viewBox="0 0 24 24"
+      height="24"
+      width="24"
+      {...props}
+    >
+      <rect x={9} y={9} width={13} height={13} rx={2} ry={2} />
+      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+    </svg>
+  );
+}
+
+export function CheckIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      viewBox="0 0 24 24"
+      height="24"
+      width="24"
+      {...props}
+    >
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
+
+export function RocketIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      viewBox="0 0 24 24"
+      height="24"
+      width="24"
+      {...props}
+    >
+      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09zM12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z" />
+      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+    </svg>
+  );
+}

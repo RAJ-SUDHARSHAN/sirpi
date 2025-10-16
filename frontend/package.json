@@ -12,12 +12,18 @@
     "@clerk/nextjs": "^6.19.4",
     "@clerk/themes": "^2.2.46",
     "@e2b/code-interpreter": "^1.5.0",
+    "@supabase/supabase-js": "^2.74.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "aws-svg-icons": "^3.0.0-2021-07-30",
     "dotenv": "^16.5.0",
     "jszip": "^3.10.1",
     "next": "15.3.2",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-confetti": "^6.4.0",
+    "react-dom": "^19.0.0",
+    "react-hot-toast": "^2.6.0",
+    "react-syntax-highlighter": "^15.6.6",
+    "react-use": "^17.6.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

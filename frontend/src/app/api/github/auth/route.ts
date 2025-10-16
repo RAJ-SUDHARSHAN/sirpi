@@ -38,7 +38,7 @@ export async function GET() {
 
     // Check for other successful responses
     if (response.ok) {
-      const data = await response.text();
+      await response.text();
     }
 
     // If we get here, something went wrong

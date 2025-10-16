@@ -104,7 +104,7 @@ class GitHubAppService:
                     raise GitHubAppError("Failed to get installation token")
 
                 data = response.json()
-                logger.info(f"Got installation token for installation {installation_id}")
+                # logger.info(f"Got installation token for installation {installation_id}")
 
                 return data["token"]
 
@@ -216,8 +216,10 @@ class GitHubAppService:
                 )
 
                 if response.status_code != 200:
-                    logger.error(f"GitHub API error: {response.status_code}")
-                    raise GitHubAppError("Failed to read file")
+                    # Don't log 404 as error - it's expected for optional files
+                    if response.status_code != 404:
+                        logger.error(f"GitHub API error: {response.status_code}")
+                    raise GitHubAppError(f"Failed to read file: {response.status_code}")
 
                 data = response.json()
 
@@ -361,6 +363,44 @@ class GitHubAppService:
                 logger.info(f"Created PR #{pr_data['number']}: {title}")
 
                 return pr_data
+
+            except httpx.RequestError as e:
+                logger.error(f"Request error: {type(e).__name__}")
+                raise GitHubAppError("Network request failed")
+
+    async def get_pull_request(
+        self, installation_id: int, owner: str, repo: str, pr_number: int
+    ) -> Dict[str, Any]:
+        """
+        Get pull request details.
+
+        Args:
+            installation_id: GitHub App installation ID
+            owner: Repository owner
+            repo: Repository name
+            pr_number: PR number
+
+        Returns:
+            Pull request object with state, merged status, etc.
+        """
+        token = await self.get_installation_token(installation_id)
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{self.github_api_base}/repos/{owner}/{repo}/pulls/{pr_number}",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                )
+
+                if response.status_code != 200:
+                    logger.error(f"GitHub API error: {response.status_code}")
+                    raise GitHubAppError("Failed to get pull request")
+
+                return response.json()
 
             except httpx.RequestError as e:
                 logger.error(f"Request error: {type(e).__name__}")

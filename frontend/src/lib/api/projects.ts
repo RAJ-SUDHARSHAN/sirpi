@@ -19,6 +19,14 @@ export interface Project {
   deployment_started_at?: string | null;
   deployment_completed_at?: string | null;
   aws_connection_id?: string | null;
+  application_url?: string | null;
+  terraform_outputs?: {
+    alb_dns_name?: string;
+    ecs_cluster_name?: string;
+    ecs_service_name?: string;
+    ecr_repository_url?: string;
+    cloudwatch_log_group?: string;
+  } | null;
   created_at: string;
 }
 

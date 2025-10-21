@@ -18,6 +18,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Sirpi - AI-Native DevOps Automation",
   description: "Automated DevOps infrastructure for your projects",
+  icons: {
+    icon: [
+      { url: '/sirpi-logo-circle.png', sizes: 'any' },
+    ],
+    apple: [
+      { url: '/sirpi-logo-circle.png' },
+    ],
+  },
 };
 
 export default function RootLayout({

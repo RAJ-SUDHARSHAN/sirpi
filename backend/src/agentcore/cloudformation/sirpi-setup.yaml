@@ -126,6 +126,7 @@ Resources:
               - ec2:DescribeNetworkInterfaces
               - ec2:CreateTags
               - ec2:DeleteTags
+              - ec2:DisassociateAddress
             Resource: "*"
 
           # Security Groups
@@ -193,6 +194,7 @@ Resources:
               - elasticloadbalancing:DeregisterTargets
               - elasticloadbalancing:DescribeTargetHealth
               - elasticloadbalancing:DescribeListenerAttributes
+              - elasticloadbalancing:ModifyTargetGroup
             Resource: "*"
 
           # ECR - Container Registry
@@ -236,6 +238,7 @@ Resources:
               - iam:TagRole
               - iam:UntagRole
               - iam:ListRoleTags
+              - iam:ListInstanceProfilesForRole
             Resource:
               - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-ecs-*"
               - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-task-*"

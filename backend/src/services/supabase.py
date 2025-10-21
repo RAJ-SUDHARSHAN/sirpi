@@ -757,6 +757,138 @@ class SupabaseService:
             logger.error(f"Failed to update project deployment status: {type(e).__name__}")
             raise DatabaseError("Failed to update deployment status")
 
+    def save_deployment_logs(
+        self,
+        project_id: str,
+        operation_type: str,
+        logs: List[str],
+        status: str,
+        duration_seconds: Optional[int] = None,
+        error_message: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Save deployment operation logs."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO deployment_logs 
+                        (project_id, operation_type, logs, status, duration_seconds, error_message, completed_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                        RETURNING id, created_at
+                        """,
+                        (project_id, operation_type, Json(logs), status, duration_seconds, error_message),
+                    )
+                    result = cur.fetchone()
+                    return result
+        except Exception as e:
+            logger.error(f"Failed to save deployment logs: {type(e).__name__}")
+            raise DatabaseError("Failed to save deployment logs")
+
+    def get_deployment_logs(
+        self, project_id: str, operation_type: Optional[str] = None, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Get deployment logs for a project. Returns only the LATEST log per operation type."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    if operation_type:
+                        # Get latest log for specific operation type
+                        cur.execute(
+                            """
+                            SELECT id, operation_type, logs, status, duration_seconds, 
+                                   error_message, created_at, completed_at
+                            FROM deployment_logs
+                            WHERE project_id = %s AND operation_type = %s
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                            """,
+                            (project_id, operation_type),
+                        )
+                    else:
+                        # Get latest log for EACH operation type using DISTINCT ON
+                        cur.execute(
+                            """
+                            SELECT DISTINCT ON (operation_type) 
+                                   id, operation_type, logs, status, duration_seconds,
+                                   error_message, created_at, completed_at
+                            FROM deployment_logs
+                            WHERE project_id = %s
+                            ORDER BY operation_type, created_at DESC
+                            """,
+                            (project_id,),
+                        )
+                    return cur.fetchall()
+        except Exception as e:
+            logger.error(f"Failed to get deployment logs: {type(e).__name__}")
+            raise DatabaseError("Failed to retrieve deployment logs")
+
+    def save_terraform_outputs(
+        self, project_id: str, outputs: Dict[str, Any]
+    ) -> bool:
+        """Save terraform outputs for a project."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE projects
+                        SET terraform_outputs = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                        RETURNING id
+                        """,
+                        (Json(outputs), project_id),
+                    )
+                    result = cur.fetchone()
+                    return bool(result)
+        except Exception as e:
+            logger.error(f"Failed to save terraform outputs: {type(e).__name__}")
+            raise DatabaseError("Failed to save terraform outputs")
+
+    def get_terraform_outputs(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Get terraform outputs for a project."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT terraform_outputs
+                        FROM projects
+                        WHERE id = %s
+                        """,
+                        (project_id,),
+                    )
+                    result = cur.fetchone()
+                    return result['terraform_outputs'] if result else None
+        except Exception as e:
+            logger.error(f"Failed to get terraform outputs: {type(e).__name__}")
+            raise DatabaseError("Failed to retrieve terraform outputs")
+    
+    def update_application_url(self, project_id: str, url: str) -> bool:
+        """Update application URL for easy access."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE projects
+                        SET application_url = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                        RETURNING id
+                        """,
+                        (url, project_id),
+                    )
+                    result = cur.fetchone()
+                    if result:
+                        logger.info(f"Updated application_url for project {project_id}: {url}")
+                        return True
+                    return False
+        except Exception as e:
+            logger.error(f"Failed to update application URL: {type(e).__name__}")
+            raise DatabaseError("Failed to update application URL")
+
 
 # Global singleton instance
 supabase = SupabaseService()

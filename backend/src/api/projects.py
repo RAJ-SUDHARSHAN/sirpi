@@ -124,8 +124,8 @@ async def get_user_projects(user_id: str = Depends(get_current_user_id)):
                     SELECT id, name, slug, repository_url, repository_name,
                            language, description, status, created_at, updated_at,
                            deployment_status, deployment_error, deployment_started_at,
-                           deployment_completed_at, cloudformation_stack_set_name,
-                           cloudformation_stack_set_id, aws_connection_id
+                           deployment_completed_at, aws_connection_id, application_url,
+                           terraform_outputs, deployment_summary
                     FROM projects
                     WHERE user_id = %s
                     ORDER BY created_at DESC
@@ -157,9 +157,10 @@ async def get_user_projects(user_id: str = Depends(get_current_user_id)):
                 "deployment_error": p.get("deployment_error"),
                 "deployment_started_at": p.get("deployment_started_at"),
                 "deployment_completed_at": p.get("deployment_completed_at"),
-                "cloudformation_stack_set_name": p.get("cloudformation_stack_set_name"),
-                "cloudformation_stack_set_id": p.get("cloudformation_stack_set_id"),
                 "aws_connection_id": p.get("aws_connection_id"),
+                "application_url": p.get("application_url"),
+                "terraform_outputs": p.get("terraform_outputs"),
+                "deployment_summary": p.get("deployment_summary"),
                 "framework_info": {
                     "framework": p["language"] or "other",
                     "display_name": p["language"] or "Other",
@@ -182,8 +183,8 @@ async def get_project_by_id(project_id: str, user_id: str = Depends(get_current_
                     SELECT id, name, slug, repository_url, repository_name,
                            installation_id, language, description, status, created_at, updated_at,
                            deployment_status, deployment_error, deployment_started_at,
-                           deployment_completed_at, cloudformation_stack_set_name,
-                           cloudformation_stack_set_id, aws_connection_id
+                           deployment_completed_at, aws_connection_id, aws_role_arn,
+                           terraform_outputs, deployment_summary, application_url
                     FROM projects
                     WHERE id = %s AND user_id = %s
                 """,
@@ -212,9 +213,11 @@ async def get_project_by_id(project_id: str, user_id: str = Depends(get_current_
                 "deployment_error": project.get("deployment_error"),
                 "deployment_started_at": project.get("deployment_started_at"),
                 "deployment_completed_at": project.get("deployment_completed_at"),
-                "cloudformation_stack_set_name": project.get("cloudformation_stack_set_name"),
-                "cloudformation_stack_set_id": project.get("cloudformation_stack_set_id"),
                 "aws_connection_id": project.get("aws_connection_id"),
+                "aws_role_arn": project.get("aws_role_arn"),
+                "terraform_outputs": project.get("terraform_outputs"),
+                "deployment_summary": project.get("deployment_summary"),
+                "application_url": project.get("application_url"),
                 "framework_info": {
                     "framework": project["language"] or "other",
                     "display_name": project["language"] or "Other",
@@ -497,8 +500,7 @@ async def get_project_detail(project_slug: str, user_id: str = Depends(get_curre
                     SELECT id, name, slug, repository_url, repository_name,
                            installation_id, language, description, status, created_at, updated_at,
                            deployment_status, deployment_error, deployment_started_at,
-                           deployment_completed_at, cloudformation_stack_set_name,
-                           cloudformation_stack_set_id, aws_connection_id
+                           deployment_completed_at, aws_connection_id, aws_role_arn
                     FROM projects
                     WHERE slug = %s AND user_id = %s
                 """,
@@ -525,9 +527,8 @@ async def get_project_detail(project_slug: str, user_id: str = Depends(get_curre
                 "deployment_error": project.get("deployment_error"),
                 "deployment_started_at": project.get("deployment_started_at"),
                 "deployment_completed_at": project.get("deployment_completed_at"),
-                "cloudformation_stack_set_name": project.get("cloudformation_stack_set_name"),
-                "cloudformation_stack_set_id": project.get("cloudformation_stack_set_id"),
                 "aws_connection_id": project.get("aws_connection_id"),
+                "aws_role_arn": project.get("aws_role_arn"),
             },
         }
 
@@ -610,11 +611,8 @@ async def update_project(
                 "deployment_error": updated_project.get("deployment_error"),
                 "deployment_started_at": updated_project.get("deployment_started_at"),
                 "deployment_completed_at": updated_project.get("deployment_completed_at"),
-                "cloudformation_stack_set_name": updated_project.get(
-                    "cloudformation_stack_set_name"
-                ),
-                "cloudformation_stack_set_id": updated_project.get("cloudformation_stack_set_id"),
                 "aws_connection_id": updated_project.get("aws_connection_id"),
+                "aws_role_arn": updated_project.get("aws_role_arn"),
             },
         }
 

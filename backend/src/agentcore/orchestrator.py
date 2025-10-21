@@ -13,6 +13,7 @@ from src.agentcore.agents.terraform_generator import TerraformGeneratorAgent
 from src.services.github_app import get_github_app
 from src.services.s3_storage import get_s3_storage
 from src.services.supabase import supabase
+from src.services.agentcore_memory import get_agentcore_memory
 from src.models import WorkflowStatus
 from src.utils.session_logger import attach_session_logger, detach_session_logger
 
@@ -30,7 +31,9 @@ class WorkflowOrchestrator:
         self.dockerfile_agent = DockerfileGeneratorAgent()
         self.terraform_agent = TerraformGeneratorAgent()
         self.s3_storage = get_s3_storage()
+        self.agentcore_memory = get_agentcore_memory()
         self._session = None
+        self._memory_data = None
 
     def _thinking_callback(self, agent_name: str, chunk: str):
         """Callback for streaming agent thinking chunks."""
@@ -141,6 +144,11 @@ class WorkflowOrchestrator:
             owner, repo = parse_github_url(repository_url)
 
             self._session = session
+            
+            # Create AgentCore memory store for this session
+            self._memory_data = self.agentcore_memory.create_session_memory(session_id)
+            session["agentcore_memory"] = self._memory_data
+            self._add_log(session, "orchestrator", "Created AgentCore memory store for agent collaboration")
 
             # Attach session logger to capture backend logs
             from src.api.workflows import active_sessions
@@ -164,6 +172,15 @@ class WorkflowOrchestrator:
                 logger.error(f"Failed to update database status: {e}", exc_info=True)
 
             raw_data = await self.github_analyzer.analyze_repository(installation_id, owner, repo)
+
+            # Store GitHub analysis in AgentCore memory
+            self.agentcore_memory.store_item(
+                self._memory_data,
+                "github-analysis",
+                raw_data.dict(),
+                "github_analyzer"
+            )
+            self._add_log(session, "github_analyzer", "Stored repository analysis in AgentCore memory")
 
             self._add_log(
                 session,
@@ -194,10 +211,24 @@ class WorkflowOrchestrator:
 
             self._add_log(session, "orchestrator", "Invoking Context Analyzer agent")
 
+            # Context agent reads from memory and adds its findings
             context = await self.context_agent.invoke(
-                {"session_id": session_id, "raw_data": raw_data},
+                {
+                    "session_id": session_id, 
+                    "raw_data": raw_data,
+                    "memory_data": self._memory_data
+                },
                 thinking_callback=self._thinking_callback,
             )
+            
+            # Store context analysis in AgentCore memory
+            self.agentcore_memory.store_item(
+                self._memory_data,
+                "context-analysis",
+                context.dict(),
+                "context_analyzer"
+            )
+            self._add_log(session, "context_analyzer", "Stored context analysis in AgentCore memory")
 
             self._add_log(
                 session,
@@ -234,8 +265,20 @@ class WorkflowOrchestrator:
                 self._add_log(session, "orchestrator", "Generating new Dockerfile from scratch")
 
             dockerfile = await self.dockerfile_agent.invoke(
-                {"session_id": session_id, "context": context},
+                {
+                    "session_id": session_id, 
+                    "context": context,
+                    "memory_data": self._memory_data
+                },
                 thinking_callback=self._thinking_callback,
+            )
+
+            # Store Dockerfile in memory
+            self.agentcore_memory.store_item(
+                self._memory_data,
+                "dockerfile",
+                dockerfile,
+                "dockerfile_generator"
             )
 
             session["files"].append(
@@ -268,8 +311,17 @@ class WorkflowOrchestrator:
                     "template_type": template_type,
                     "project_id": session_id,
                     "repo_full_name": f"{owner}/{repo}",
+                    "memory_data": self._memory_data
                 },
                 thinking_callback=self._thinking_callback,
+            )
+
+            # Store Terraform files in memory
+            self.agentcore_memory.store_item(
+                self._memory_data,
+                "terraform-files",
+                terraform_files,
+                "terraform_generator"
             )
 
             for filename, content in terraform_files.items():

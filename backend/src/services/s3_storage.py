@@ -43,14 +43,15 @@ class S3StorageService:
                 except ClientError:
                     # Bucket doesn't exist, create it
                     if settings.s3_region == "us-east-1":
-                        # us-east-1 doesn't accept LocationConstraint
+                        # us-east-1 doesn't accept LocationConstraint parameter
                         self.s3_client.create_bucket(Bucket=bucket_name)
                     else:
+                        # All other regions require LocationConstraint
                         self.s3_client.create_bucket(
                             Bucket=bucket_name,
                             CreateBucketConfiguration={"LocationConstraint": settings.s3_region},
                         )
-                    logger.info(f"Created S3 bucket: {bucket_name}")
+                    logger.info(f"Created S3 bucket: {bucket_name} in {settings.s3_region}")
 
                 # Always enable/verify versioning (idempotent)
                 if enable_versioning:

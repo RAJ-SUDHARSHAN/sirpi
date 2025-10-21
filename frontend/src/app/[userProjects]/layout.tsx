@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useParams } from "next/navigation";
 import { useUser, UserButton } from "@clerk/nextjs";
+import Image from "next/image";
 
 export default function UserProjectsLayout({
   children,
@@ -53,12 +54,15 @@ export default function UserProjectsLayout({
       <header className="border-b border-gray-800">
         <div className="px-6 pt-4 pb-2">
           <div className="flex justify-between items-center">
-            {/* Left side - Logo / User / Projects */}
+            {/* Left side - Breadcrumb with Logo / Projects / Project / Page */}
             <div className="flex items-center gap-2">
               <Link href="/" className="flex items-center cursor-pointer">
-                <div className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-                  Sirpi
-                </div>
+                <Image
+                  src="/sirpi-logo-horizontal.png"
+                  alt="Sirpi"
+                  height={24}
+                  width={100}
+                />
               </Link>
 
               {/* Chevron */}
@@ -76,11 +80,56 @@ export default function UserProjectsLayout({
                 />
               </svg>
 
-              <span className="text-gray-300">
+              <Link href={`/${userProjects}`} className="text-gray-400 hover:text-white transition-colors">
                 {user.firstName ||
                   user.emailAddresses[0].emailAddress.split("@")[0]}{" "}
                 projects
-              </span>
+              </Link>
+              
+              {/* Dynamic breadcrumb based on current path */}
+              {params.projectSlug && (
+                <>
+                  <svg
+                    className="w-4 h-4 text-gray-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                  <Link 
+                    href={`/${userProjects}/${params.projectSlug}`}
+                    className="text-gray-400 hover:text-white transition-colors capitalize"
+                  >
+                    {params.projectSlug}
+                  </Link>
+                  
+                  {/* Show current page (deploy, settings, etc.) */}
+                  {pathname.includes('/deploy') && (
+                    <>
+                      <svg
+                        className="w-4 h-4 text-gray-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
+                      <span className="text-white font-medium">Deploy</span>
+                    </>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Right side - User profile */}

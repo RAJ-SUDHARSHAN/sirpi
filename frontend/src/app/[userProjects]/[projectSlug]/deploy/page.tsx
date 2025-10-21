@@ -6,11 +6,10 @@ import { useParams, useRouter } from "next/navigation";
 import { ansiToHtml } from "@/lib/utils/ansi-to-html";
 import {
   ChevronLeftIcon,
-  PlayIcon,
   CheckCircleIcon,
-  ClockIcon,
   XCircleIcon,
   ExternalLinkIcon,
+  ChevronDownIcon,
 } from "@/components/ui/icons";
 import {
   Project,
@@ -18,26 +17,37 @@ import {
   projectsApi,
 } from "@/lib/api/projects";
 import toast from "react-hot-toast";
+import AWSSetupFlow from "@/components/AWSSetupFlow";
+import SirpiAssistant from "@/components/SirpiAssistant";
+import { apiCall } from "@/lib/api-client";
 
-// AWS Service Icon
-const AWSIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="text-orange-500">
-    <path d="M18.77 14.85c-.37.15-.75.22-1.13.22-1.09 0-2.1-.56-2.67-1.49L12 8.85l-2.97 4.73c-.57.93-1.58 1.49-2.67 1.49-.38 0-.76-.07-1.13-.22L2 16.15v3.7c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-3.7l-3.23-1.3z" />
-    <path d="M4 4c-1.1 0-2 .9-2 2v6.85l3.23-1.3c.37-.15.75-.22 1.13-.22 1.09 0 2.1.56 2.67 1.49L12 17.55l2.97-4.73c.57-.93 1.58-1.49 2.67-1.49.38 0 .76.07 1.13.22L22 12.85V6c0-1.1-.9-2-2-2H4z" />
-  </svg>
-);
-
-type DeploymentStep = "not_started" | "building" | "built" | "planning" | "planned" | "deploying" | "deployed" | "failed";
+type DeploymentStep =
+  | "not_started"
+  | "building"
+  | "built"
+  | "planning"
+  | "planned"
+  | "deploying"
+  | "deployed"
+  | "failed";
 
 interface DeploymentState {
   currentStep: DeploymentStep;
   imagePushed: boolean;
   planGenerated: boolean;
   deployed: boolean;
-  logs: string[];
   operationId: string | null;
   isStreaming: boolean;
   error: string | null;
+}
+
+interface CollapsibleSection {
+  id: string;
+  title: string;
+  logs: string[];
+  status: "idle" | "running" | "success" | "error";
+  duration?: string;
+  isExpanded: boolean;
 }
 
 export default function DeployPage() {
@@ -54,22 +64,48 @@ export default function DeployPage() {
     imagePushed: false,
     planGenerated: false,
     deployed: false,
-    logs: [],
     operationId: null,
     isStreaming: false,
     error: null,
   });
+  const [sections, setSections] = useState<CollapsibleSection[]>([
+    {
+      id: "build",
+      title: "Build Logs",
+      logs: [],
+      status: "idle",
+      isExpanded: false,
+    },
+    {
+      id: "plan",
+      title: "Deployment Summary",
+      logs: [],
+      status: "idle",
+      isExpanded: false,
+    },
+    {
+      id: "deploy",
+      title: "Deployment Logs",
+      logs: [],
+      status: "idle",
+      isExpanded: false,
+    },
+  ]);
+  const [showDestroyConfirm, setShowDestroyConfirm] = useState(false);
+  const [isDestroying, setIsDestroying] = useState(false);
+  const [showAWSSetup, setShowAWSSetup] = useState(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 3;
+  const operationStartTime = useRef<number | null>(null);
 
   useEffect(() => {
     if (logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [deploymentState.logs]);
+  }, [sections]);
 
   useEffect(() => {
     if (user) {
@@ -89,18 +125,128 @@ export default function DeployPage() {
         if (overview) {
           const userOverview = overview as { projects: { items: Project[] } };
           const foundProject = userOverview.projects.items.find(
-            (p) => p.slug === projectSlug || p.name.toLowerCase().replace(/[^a-z0-9]/g, "-") === projectSlug
+            (p) =>
+              p.slug === projectSlug ||
+              p.name.toLowerCase().replace(/[^a-z0-9]/g, "-") === projectSlug
           );
 
           if (foundProject) {
+            console.log('[LoadProject] Found project:', foundProject.name);
+            console.log('[LoadProject] Deployment status:', foundProject.deployment_status);
+            console.log('[LoadProject] Application URL:', foundProject.application_url);
             setProject(foundProject);
             
-            const canDeploy = 
+            // Set deployment state based on project status
+            if (foundProject.deployment_status === 'deployed') {
+              console.log('[LoadProject] Setting deployed state to true');
+              setDeploymentState(prev => ({
+                ...prev,
+                currentStep: 'deployed',
+                imagePushed: true,
+                planGenerated: true,
+                deployed: true,
+              }));
+            }
+
+            // Load previous deployment logs from database
+            try {
+              const token = await (window as any).Clerk?.session?.getToken();
+              const logsResponse = await fetch(
+                `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${foundProject.id}/logs`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                  },
+                }
+              );
+
+              if (logsResponse.ok) {
+                const logsData = await logsResponse.json();
+                if (logsData.success && logsData.data.logs.length > 0) {
+                  const sectionMap: Record<string, string> = {
+                    build_image: "build",
+                    plan: "plan",
+                    apply: "deploy",
+                    destroy: "destroy",
+                  };
+
+                  const restoredSections = [...sections];
+
+                  logsData.data.logs.forEach((logRecord: any) => {
+                    const sectionId = sectionMap[logRecord.operation_type];
+                    if (sectionId) {
+                      const sectionIndex = restoredSections.findIndex(
+                        (s) => s.id === sectionId
+                      );
+                      if (sectionIndex >= 0) {
+                        restoredSections[sectionIndex] = {
+                          ...restoredSections[sectionIndex],
+                          logs: logRecord.logs || [],
+                          status:
+                            logRecord.status === "success"
+                              ? "success"
+                              : logRecord.status === "error"
+                              ? "error"
+                              : "idle",
+                          duration: logRecord.duration_seconds
+                            ? `${logRecord.duration_seconds}s`
+                            : undefined,
+                          isExpanded: false,
+                        };
+                      }
+                    }
+                  });
+
+                  setSections(restoredSections);
+
+                  const hasCompletedBuild = logsData.data.logs.some(
+                    (l: any) =>
+                      l.operation_type === "build_image" &&
+                      l.status === "success"
+                  );
+                  const hasCompletedPlan = logsData.data.logs.some(
+                    (l: any) =>
+                      l.operation_type === "plan" && l.status === "success"
+                  );
+                  const hasCompletedDeploy = logsData.data.logs.some(
+                    (l: any) =>
+                      l.operation_type === "apply" && l.status === "success"
+                  );
+
+                  if (hasCompletedDeploy) {
+                    setDeploymentState((prev) => ({
+                      ...prev,
+                      currentStep: "deployed",
+                      imagePushed: true,
+                      planGenerated: true,
+                      deployed: true,
+                    }));
+                  } else if (hasCompletedPlan) {
+                    setDeploymentState((prev) => ({
+                      ...prev,
+                      currentStep: "planned",
+                      imagePushed: true,
+                      planGenerated: true,
+                    }));
+                  } else if (hasCompletedBuild) {
+                    setDeploymentState((prev) => ({
+                      ...prev,
+                      currentStep: "built",
+                      imagePushed: true,
+                    }));
+                  }
+                }
+              }
+            } catch (logError) {
+              console.error("Failed to load deployment logs:", logError);
+            }
+
+            const canDeploy =
               foundProject.deployment_status === "aws_verified" ||
-              foundProject.status === "ready_to_deploy" ||
-              foundProject.status === "pr_merged" ||
-              foundProject.status === "completed";
-            
+              foundProject.deployment_status === "deployed" ||
+              foundProject.deployment_status === "completed" ||
+              foundProject.status === "pr_merged";
+
             if (!canDeploy) {
               router.push(`/${userProjects}/${projectSlug}`);
               return;
@@ -129,8 +275,51 @@ export default function DeployPage() {
     };
   }, []);
 
-  const startOperation = async (operation: "build_image" | "plan" | "apply") => {
+  const toggleSection = (sectionId: string) => {
+    setSections((prev) =>
+      prev.map((s) =>
+        s.id === sectionId ? { ...s, isExpanded: !s.isExpanded } : s
+      )
+    );
+  };
+
+  const addLogToSection = (sectionId: string, message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setSections((prev) =>
+      prev.map((s) =>
+        s.id === sectionId
+          ? {
+              ...s,
+              logs: [...s.logs, `[${timestamp}] ${message}`],
+              status: "running",
+              isExpanded: true,
+            }
+          : s
+      )
+    );
+  };
+
+  const updateSectionStatus = (
+    sectionId: string,
+    status: "idle" | "running" | "success" | "error",
+    duration?: string
+  ) => {
+    setSections((prev) =>
+      prev.map((s) => (s.id === sectionId ? { ...s, status, duration } : s))
+    );
+  };
+
+  const startOperation = async (
+    operation: "build_image" | "plan" | "apply"
+  ) => {
     if (!project) return;
+
+    const sectionMap = {
+      build_image: "build",
+      plan: "plan",
+      apply: "deploy",
+    };
+    const sectionId = sectionMap[operation];
 
     const stepMap = {
       build_image: "building",
@@ -138,17 +327,26 @@ export default function DeployPage() {
       apply: "deploying",
     } as const;
 
-    setDeploymentState(prev => ({
+    setSections((prev) =>
+      prev.map((s) =>
+        s.id === sectionId
+          ? { ...s, logs: [], status: "running", isExpanded: true }
+          : s
+      )
+    );
+
+    setDeploymentState((prev) => ({
       ...prev,
       currentStep: stepMap[operation],
-      logs: [],
       isStreaming: true,
       error: null,
     }));
 
+    operationStartTime.current = Date.now();
+
     try {
       const token = await (window as any).Clerk?.session?.getToken();
-      
+
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${project.id}/${operation}`,
         {
@@ -163,71 +361,105 @@ export default function DeployPage() {
       const data = await response.json();
 
       if (data.success && data.data.operation_id) {
-        setDeploymentState(prev => ({ ...prev, operationId: data.data.operation_id }));
-        startEventStream(data.data.operation_id, operation);
+        setDeploymentState((prev) => ({
+          ...prev,
+          operationId: data.data.operation_id,
+        }));
+        startEventStream(data.data.operation_id, operation, sectionId);
       } else {
         throw new Error(data.errors?.[0] || `Failed to start ${operation}`);
       }
     } catch (error) {
-      setDeploymentState(prev => ({
+      setDeploymentState((prev) => ({
         ...prev,
         currentStep: "failed",
         error: String(error),
         isStreaming: false,
       }));
+      updateSectionStatus(sectionId, "error");
       toast.error(`Failed to start ${operation}`);
     }
   };
 
-  const startEventStream = (operationId: string, operation: "build_image" | "plan" | "apply") => {
-    const eventSource = new EventSource(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/operations/${operationId}/stream`);
+  const startEventStream = (
+    operationId: string,
+    operation: "build_image" | "plan" | "apply",
+    sectionId: string
+  ) => {
+    const eventSource = new EventSource(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/operations/${operationId}/stream`
+    );
     eventSourceRef.current = eventSource;
 
-    eventSource.addEventListener('connected', (event: MessageEvent) => {
+    eventSource.addEventListener("connected", (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        addLog(data.message || "🔗 Connected");
+        addLogToSection(sectionId, data.message || "Connected");
       } catch (err) {
-        console.error('Parse error:', err);
+        console.error("Parse error:", err);
       }
     });
 
-    eventSource.addEventListener('log', (event: MessageEvent) => {
+    eventSource.addEventListener("log", (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         if (data.message) {
-          addLog(data.message.trim());
+          addLogToSection(sectionId, data.message.trim());
         }
       } catch (err) {
-        console.error('Parse error:', err);
+        console.error("Parse error:", err);
       }
     });
 
-    eventSource.addEventListener('complete', (event: MessageEvent) => {
+    eventSource.addEventListener("complete", (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
+        const duration = operationStartTime.current
+          ? `${Math.round((Date.now() - operationStartTime.current) / 1000)}s`
+          : undefined;
+
         if (data.status === "completed") {
-          setDeploymentState(prev => {
+          updateSectionStatus(sectionId, "success", duration);
+
+          setDeploymentState((prev) => {
             const updates: Partial<DeploymentState> = { isStreaming: false };
-            
+
             if (operation === "build_image") {
               updates.currentStep = "built";
               updates.imagePushed = true;
-              addLog("✅ Docker image ready! You can now generate the deployment plan.");
             } else if (operation === "plan") {
               updates.currentStep = "planned";
               updates.planGenerated = true;
-              addLog("✅ Plan generated! Review the changes above, then deploy.");
             } else if (operation === "apply") {
               updates.currentStep = "deployed";
               updates.deployed = true;
-              addLog("🎉 Deployment complete! Your infrastructure is live.");
+
+              // Refetch project to get terraform outputs
+              console.log('[Deploy] Deployment complete, fetching updated project data...');
+              setTimeout(async () => {
+                try {
+                  console.log('[Deploy] Fetching project by ID:', project.id);
+                  const updatedProject = await projectsApi.getProjectById(
+                    project.id
+                  );
+                  if (updatedProject) {
+                    console.log('[Deploy] Updated project terraform_outputs:', updatedProject.terraform_outputs);
+                    setProject(updatedProject);
+                    console.log('[Deploy] Project state updated successfully');
+                  } else {
+                    console.warn('[Deploy] No project returned from API');
+                  }
+                } catch (error) {
+                  console.error("Failed to refetch project:", error);
+                }
+              }, 3000); // Wait 3 seconds for backend to save outputs
             }
-            
+
             return { ...prev, ...updates };
           });
         } else if (data.status === "failed") {
-          setDeploymentState(prev => ({
+          updateSectionStatus(sectionId, "error", duration);
+          setDeploymentState((prev) => ({
             ...prev,
             currentStep: "failed",
             error: data.error || "Operation failed",
@@ -236,24 +468,24 @@ export default function DeployPage() {
         }
         stopStreaming();
       } catch (err) {
-        console.error('Parse error:', err);
+        console.error("Parse error:", err);
       }
     });
 
     eventSource.onerror = () => {
-      addLog("❌ Lost connection to stream");
-      
-      // Try to reconnect if we haven't exceeded max attempts
       if (reconnectAttemptsRef.current < maxReconnectAttempts) {
         reconnectAttemptsRef.current++;
-        addLog(`🔄 Attempting to reconnect (${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`);
+        addLogToSection(
+          sectionId,
+          `Reconnecting (${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`
+        );
         stopStreaming();
         setTimeout(() => {
-          startEventStream(operationId, operation);
-        }, 2000); // Wait 2 seconds before reconnecting
+          startEventStream(operationId, operation, sectionId);
+        }, 2000);
       } else {
-        addLog("⚠️ Max reconnection attempts reached. Operation may still be running in background.");
-        addLog("Check operation status or refresh the page.");
+        addLogToSection(sectionId, "Max reconnection attempts reached");
+        updateSectionStatus(sectionId, "error");
         stopStreaming();
       }
     };
@@ -264,99 +496,153 @@ export default function DeployPage() {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
-    reconnectAttemptsRef.current = 0; // Reset reconnect attempts
+    reconnectAttemptsRef.current = 0;
   };
 
-  const checkOperationStatus = async () => {
-    if (!deploymentState.operationId) return;
+  const handleDestroy = async () => {
+    if (!project) return;
+
+    setIsDestroying(true);
+    setShowDestroyConfirm(false);
+
+    setSections((prev) => [
+      ...prev,
+      {
+        id: "destroy",
+        title: "Destroy Logs",
+        logs: [],
+        status: "running",
+        isExpanded: true,
+      },
+    ]);
 
     try {
       const token = await (window as any).Clerk?.session?.getToken();
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/operations/${deploymentState.operationId}/status`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${project.id}/destroy`,
         {
+          method: "POST",
           headers: {
+            "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
         }
       );
 
       const data = await response.json();
-      
-      if (data.success) {
-        const status = data.data.status;
-        addLog(`🔍 Status check: ${status}`);
-        
-        if (status === "completed") {
-          setDeploymentState(prev => ({
-            ...prev,
-            currentStep: prev.currentStep === "building" ? "built" : 
-                        prev.currentStep === "planning" ? "planned" : 
-                        prev.currentStep === "deploying" ? "deployed" : prev.currentStep,
-            imagePushed: prev.currentStep === "building" || prev.imagePushed,
-            planGenerated: prev.currentStep === "planning" || prev.planGenerated,
-            deployed: prev.currentStep === "deploying" || prev.deployed,
-            isStreaming: false,
-          }));
-        } else if (status === "failed") {
-          setDeploymentState(prev => ({
-            ...prev,
-            currentStep: "failed",
-            error: data.data.error || "Operation failed",
-            isStreaming: false,
-          }));
-        } else if (status === "running") {
-          addLog(`⏳ Operation still running (${data.data.log_count} logs captured)`);
-          addLog("🔄 Reconnecting to stream...");
-          
-          // Determine operation type from current step
-          setDeploymentState(prev => {
-            const operation = prev.currentStep === "building" ? "build_image" :
-                            prev.currentStep === "planning" ? "plan" :
-                            prev.currentStep === "deploying" ? "apply" : null;
-            
-            if (operation) {
-              reconnectAttemptsRef.current = 0;
-              setTimeout(() => {
-                startEventStream(deploymentState.operationId!, operation as "build_image" | "plan" | "apply");
-              }, 100);
-            }
-            return prev;
-          });
-        }
+
+      if (data.success && data.data.operation_id) {
+        setDeploymentState((prev) => ({
+          ...prev,
+          operationId: data.data.operation_id,
+          isStreaming: true,
+        }));
+        operationStartTime.current = Date.now();
+        startEventStream(data.data.operation_id, "apply", "destroy");
+        toast.success("Destruction started");
+      } else {
+        throw new Error(data.errors?.[0] || "Failed to start destruction");
       }
     } catch (error) {
-      addLog(`❌ Failed to check status: ${error}`);
+      toast.error(`Failed to destroy: ${error}`);
+      updateSectionStatus("destroy", "error");
+    } finally {
+      setIsDestroying(false);
     }
   };
 
-  const addLog = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setDeploymentState(prev => ({
-      ...prev,
-      logs: [...prev.logs, `[${timestamp}] ${message}`],
-    }));
+  const handleAWSSetupComplete = async (roleArn: string) => {
+    setShowAWSSetup(false);
+
+    try {
+      if (project?.id) {
+        const response = await apiCall(`/projects/${project.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            deployment_status: "aws_verified",
+            aws_role_arn: roleArn,
+          }),
+        });
+
+        if (response.ok) {
+          const updatedProject = await projectsApi.getProjectById(project.id);
+          if (updatedProject) {
+            setProject(updatedProject);
+          }
+          toast.success("AWS connected! You can now deploy.");
+        }
+      }
+    } catch (error) {
+      toast.error("Failed to connect AWS");
+    }
+  };
+
+  const getStatusBadge = (status: "idle" | "running" | "success" | "error") => {
+    switch (status) {
+      case "running":
+        return (
+          <div className="flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse" />
+            <span className="text-xs text-gray-400">Running</span>
+          </div>
+        );
+      case "success":
+        return (
+          <div className="flex items-center gap-1.5">
+            <svg
+              className="w-3.5 h-3.5 text-green-300"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <span className="text-xs text-green-300">Success</span>
+          </div>
+        );
+      case "error":
+        return (
+          <div className="flex items-center gap-1.5">
+            <svg
+              className="w-3.5 h-3.5 text-red-400"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <span className="text-xs text-red-400">Failed</span>
+          </div>
+        );
+      default:
+        return <span className="text-xs text-gray-600">Idle</span>;
+    }
   };
 
   if (!user || isLoading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
-          <p className="text-gray-400">Loading...</p>
-        </div>
+        <div className="w-6 h-6 border-2 border-gray-800 border-t-gray-400 rounded-full animate-spin" />
       </div>
     );
   }
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+      <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Project Not Found</h1>
+          <h1 className="text-xl font-semibold text-gray-200 mb-4">
+            Project Not Found
+          </h1>
           <button
             onClick={() => router.push(`/${userProjects}`)}
-            className="px-6 py-3 bg-white text-black rounded-lg"
+            className="px-4 py-2 bg-white text-black rounded-md hover:bg-gray-100 transition-colors text-sm font-medium"
           >
             Go Back
           </button>
@@ -365,175 +651,546 @@ export default function DeployPage() {
     );
   }
 
+  const isAWSVerified =
+    project.deployment_status === "aws_verified" ||
+    project.deployment_status === "deployed" ||
+    project.deployment_status === "completed";
+
   const steps = [
     {
       id: "build",
-      title: "1. Build & Push Docker Image",
-      description: "Build your application into a Docker container and push to ECR",
-      status: deploymentState.imagePushed ? "completed" : deploymentState.currentStep === "building" ? "active" : "pending",
+      title: "Build",
+      subtitle: "Container Image",
+      icon: (
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+          />
+        </svg>
+      ),
+      status: deploymentState.imagePushed
+        ? "completed"
+        : deploymentState.currentStep === "building"
+        ? "active"
+        : "pending",
       action: () => startOperation("build_image"),
-      actionText: "Build & Push Image",
       disabled: deploymentState.isStreaming || deploymentState.imagePushed,
     },
     {
       id: "plan",
-      title: "2. Generate Deployment Plan",
-      description: "Preview infrastructure changes before deploying",
-      status: deploymentState.planGenerated ? "completed" : deploymentState.currentStep === "planning" ? "active" : !deploymentState.imagePushed ? "disabled" : "pending",
+      title: "Plan",
+      subtitle: "Infrastructure",
+      icon: (
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+          />
+        </svg>
+      ),
+      status: deploymentState.planGenerated
+        ? "completed"
+        : deploymentState.currentStep === "planning"
+        ? "active"
+        : !deploymentState.imagePushed
+        ? "disabled"
+        : "pending",
       action: () => startOperation("plan"),
-      actionText: "Generate Plan",
-      disabled: deploymentState.isStreaming || !deploymentState.imagePushed || deploymentState.planGenerated,
+      disabled:
+        deploymentState.isStreaming ||
+        !deploymentState.imagePushed ||
+        deploymentState.planGenerated,
     },
     {
       id: "deploy",
-      title: "3. Deploy to AWS",
-      description: "Create your infrastructure on AWS",
-      status: deploymentState.deployed ? "completed" : deploymentState.currentStep === "deploying" ? "active" : !deploymentState.planGenerated ? "disabled" : "pending",
+      title: "Deploy",
+      subtitle: "to Production",
+      icon: (
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+          />
+        </svg>
+      ),
+      status: deploymentState.deployed
+        ? "completed"
+        : deploymentState.currentStep === "deploying"
+        ? "active"
+        : !deploymentState.planGenerated
+        ? "disabled"
+        : "pending",
       action: () => startOperation("apply"),
-      actionText: "Deploy Infrastructure",
-      disabled: deploymentState.isStreaming || !deploymentState.planGenerated || deploymentState.deployed,
+      // disabled: deploymentState.isStreaming || !deploymentState.planGenerated || deploymentState.deployed,
     },
   ];
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-screen bg-black">
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Header */}
-        <button onClick={() => router.push(`/${userProjects}/${projectSlug}`)} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-6">
-          <ChevronLeftIcon className="w-4 h-4" />
-          Back to Project
-        </button>
 
-        <div className="flex items-center space-x-3 mb-2">
-          <AWSIcon />
-          <h1 className="text-3xl font-bold text-white">Deploy to AWS</h1>
-        </div>
-        <p className="text-gray-400 mb-8">
-          Deploy <strong>{project.name}</strong> step-by-step with guided workflow
-        </p>
-
-        {/* Steps */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          {steps.map((step, idx) => (
-            <div
-              key={step.id}
-              className={`p-6 rounded-lg border-2 transition-all ${
-                step.status === "completed"
-                  ? "bg-green-900/20 border-green-500"
-                  : step.status === "active"
-                  ? "bg-blue-900/20 border-blue-500 animate-pulse"
-                  : step.status === "disabled"
-                  ? "bg-gray-900/50 border-gray-700 opacity-50"
-                  : "bg-gray-900/50 border-gray-600 hover:border-gray-500"
-              }`}
-            >
-              <div className="flex items-start justify-between mb-4">
-                <h3 className="text-lg font-semibold">{step.title}</h3>
-                {step.status === "completed" && (
-                  <CheckCircleIcon className="w-6 h-6 text-green-500" />
-                )}
-                {step.status === "active" && (
-                  <div className="w-6 h-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-                )}
-                {step.status === "pending" && (
-                  <ClockIcon className="w-6 h-6 text-gray-400" />
-                )}
-              </div>
-              <p className="text-sm text-gray-400 mb-4">{step.description}</p>
-              <button
-                onClick={step.action}
-                disabled={step.disabled}
-                className={`w-full px-4 py-2 rounded-lg font-medium transition-colors ${
-                  step.disabled
-                    ? "bg-gray-700 text-gray-500 cursor-not-allowed"
-                    : "bg-white text-black hover:bg-gray-100"
-                }`}
-              >
-                {step.actionText}
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Deployment Logs */}
-        {deploymentState.logs.length > 0 && (
-          <div className="bg-black border border-gray-800 rounded-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <h3 className="text-lg font-medium text-white">Deployment Logs</h3>
-                {deploymentState.isStreaming && (
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                    <span className="text-sm text-gray-400">Live</span>
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-3xl font-bold text-white">
+                  {project.name}
+                </h1>
+                {deploymentState.deployed && (
+                  <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 text-green-300 rounded-full text-xs font-medium">
+                    <div className="w-1.5 h-1.5 bg-green-300 rounded-full animate-pulse" />
+                    <span>Production</span>
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                {deploymentState.operationId && !deploymentState.isStreaming && (
-                  <button 
-                    onClick={checkOperationStatus}
-                    className="px-3 py-1 text-sm text-blue-400 hover:text-blue-300 border border-blue-400/30 rounded hover:bg-blue-400/10 transition-colors"
-                  >
-                    Check Status
-                  </button>
-                )}
-                <button onClick={() => setDeploymentState(prev => ({ ...prev, logs: [] }))} className="text-sm text-gray-400 hover:text-white transition-colors">
-                  Clear
-                </button>
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <span>{project.repository_name}</span>
               </div>
             </div>
-            <div className="p-6 bg-gray-950 overflow-y-auto" style={{ maxHeight: '500px' }}>
-              <div className="font-mono text-sm text-gray-500 leading-relaxed">
-                {deploymentState.logs.map((log, index) => (
-                  <div 
-                    key={index} 
-                    className="whitespace-pre-wrap break-words mb-0.5"
-                    dangerouslySetInnerHTML={{ __html: ansiToHtml(log) }}
-                  />
-                ))}
-                <div ref={logsEndRef} />
+            <button
+              onClick={() => setShowDestroyConfirm(true)}
+              disabled={isDestroying || !deploymentState.deployed}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-red-400 border border-[#333333] hover:border-red-500/30 rounded-md transition-colors disabled:opacity-50"
+            >
+              {isDestroying ? "Destroying..." : "Destroy Infrastructure"}
+            </button>
+          </div>
+
+          {/* Deployment Info Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-4">
+              <div className="text-xs text-gray-500 mb-1">Template</div>
+              <div className="text-sm font-medium text-gray-200">
+                ECS Fargate
+              </div>
+              <div className="text-xs text-gray-600 mt-1">
+                Serverless containers
+              </div>
+            </div>
+
+            <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-4">
+              <div className="text-xs text-gray-500 mb-1">Region</div>
+              <div className="text-sm font-medium text-gray-200">us-west-2</div>
+              <div className="text-xs text-gray-600 mt-1">US West (Oregon)</div>
+            </div>
+
+            <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-4">
+              <div className="text-xs text-gray-500 mb-1">Status</div>
+              <div className="text-sm font-medium text-gray-200">
+                {deploymentState.deployed
+                  ? "Deployed"
+                  : deploymentState.planGenerated
+                  ? "Ready to Deploy"
+                  : deploymentState.imagePushed
+                  ? "Image Built"
+                  : isAWSVerified
+                  ? "Ready"
+                  : "AWS Setup Required"}
+              </div>
+              <div className="text-xs text-gray-600 mt-1">
+                {deploymentState.deployed
+                  ? "Infrastructure live"
+                  : isAWSVerified
+                  ? "Ready for deployment"
+                  : "Connect AWS account"}
               </div>
             </div>
           </div>
+
+          {/* Infrastructure Overview - Only show if deployed or planned */}
+          {(deploymentState.deployed || deploymentState.planGenerated) && (
+            <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-6 mb-8">
+              <h3 className="text-sm font-semibold text-gray-200 mb-4">
+                Infrastructure Resources
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <div className="text-xs text-gray-500 mb-3">Compute</div>
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-sm text-gray-300">ECS Cluster</div>
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          {project.name}-cluster
+                        </div>
+                      </div>
+                      {deploymentState.deployed && (
+                        <div className="w-2 h-2 bg-green-400 rounded-full mt-1.5" />
+                      )}
+                    </div>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-sm text-gray-300">ECS Service</div>
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          {project.name}-service
+                        </div>
+                      </div>
+                      {deploymentState.deployed && (
+                        <div className="w-2 h-2 bg-green-400 rounded-full mt-1.5" />
+                      )}
+                    </div>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-sm text-gray-300">
+                          Task Definition
+                        </div>
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          Fargate 0.5 vCPU / 1GB RAM
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs text-gray-500 mb-3">Network</div>
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-sm text-gray-300">
+                          Application Load Balancer
+                        </div>
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          {project.name}-alb
+                        </div>
+                      </div>
+                      {deploymentState.deployed && (
+                        <div className="w-2 h-2 bg-green-400 rounded-full mt-1.5" />
+                      )}
+                    </div>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-sm text-gray-300">VPC</div>
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          3 AZs with public subnets
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-sm text-gray-300">
+                          Security Group
+                        </div>
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          HTTP/HTTPS ingress
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {deploymentState.deployed && (
+                <div className="mt-6 pt-6 border-t border-[#333333]">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="text-xs text-gray-500 mb-1">
+                        Application URL
+                      </div>
+                      {project.application_url ? (
+                        <div className="text-sm text-gray-300 font-mono">
+                          {project.application_url}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500 italic">
+                          Deploy your infrastructure to get the application URL
+                        </div>
+                      )}
+                    </div>
+                    {project.application_url && (
+                      <a
+                        href={`http://${project.application_url}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-white text-black rounded-md hover:bg-gray-100 transition-colors text-xs font-medium"
+                      >
+                        <span>Visit</span>
+                        <ExternalLinkIcon className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* AWS Setup Required - Show prominently if not verified */}
+        {!isAWSVerified && (
+          <div className="bg-orange-500/10 border border-orange-400/30 rounded-lg p-6 mb-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-orange-300 mb-2">
+                  AWS Account Setup Required
+                </h3>
+                <p className="text-sm text-gray-400 mb-1">
+                  Connect your AWS account to enable deployment operations:
+                </p>
+                <ul className="text-xs text-gray-500 space-y-0.5 ml-4 mt-2">
+                  <li>• Build and push Docker images to ECR</li>
+                  <li>• Generate Terraform deployment plans</li>
+                  <li>• Deploy infrastructure to your AWS account</li>
+                </ul>
+              </div>
+              <button
+                onClick={() => setShowAWSSetup(true)}
+                className="px-6 py-3 bg-white text-black rounded-lg hover:bg-gray-100 transition-colors text-sm font-medium"
+              >
+                Connect AWS
+              </button>
+            </div>
+          </div>
         )}
+
+        {/* Deployment Steps - Only show if AWS verified */}
+        {isAWSVerified && (
+          <div className="grid grid-cols-3 gap-3 mb-8">
+            {steps.map((step, index) => (
+              <div key={step.id} className="relative">
+                {index < steps.length - 1 && (
+                  <div className="absolute top-7 left-full w-3 h-px bg-[#1a1a1a] z-0">
+                    {step.status === "completed" && (
+                      <div className="h-full w-full bg-green-500" />
+                    )}
+                  </div>
+                )}
+
+                <button
+                  onClick={step.action}
+                  disabled={step.disabled}
+                  className={`relative w-full text-left p-4 rounded-lg border transition-all ${
+                    step.status === "completed"
+                      ? "bg-green-500/15 border-green-400/40 hover:bg-green-500/20"
+                      : step.status === "active"
+                      ? "bg-[#0a0a0a] border-gray-500 shadow-lg"
+                      : step.status === "disabled"
+                      ? "bg-[#0d0d0d] border-[#3a3a3a] opacity-70"
+                      : "bg-[#0a0a0a] border-[#3a3a3a] hover:border-gray-600"
+                  }`}
+                  style={{ zIndex: 1 }}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div
+                      className={`p-2 rounded-md ${
+                        step.status === "completed"
+                          ? "bg-green-500/25 text-green-300"
+                          : step.status === "active"
+                          ? "bg-gray-900 text-gray-300"
+                          : step.status === "disabled"
+                          ? "bg-[#1a1a1a] text-gray-600"
+                          : "bg-gray-950 text-gray-500"
+                      }`}
+                    >
+                      {step.icon}
+                    </div>
+                    {step.status === "completed" && (
+                      <svg
+                        className="w-4 h-4 text-green-300"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                    {step.status === "active" && (
+                      <div className="w-4 h-4 border-2 border-gray-700 border-t-gray-400 rounded-full animate-spin" />
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-sm mb-0.5 text-gray-200">
+                      {step.title}
+                    </h3>
+                    <p className="text-xs text-gray-600">{step.subtitle}</p>
+                  </div>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Collapsible Log Sections */}
+        <div className="space-y-px mb-6">
+          {sections
+            .filter((s) => s.logs.length > 0 || s.status !== "idle")
+            .map((section) => (
+              <div
+                key={section.id}
+                className="bg-[#0a0a0a] border border-[#333333] rounded-lg overflow-hidden"
+              >
+                <button
+                  onClick={() => toggleSection(section.id)}
+                  className="w-full px-5 py-3 flex items-center justify-between hover:bg-[#121212] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <ChevronDownIcon
+                      className={`w-4 h-4 text-gray-600 transition-transform ${
+                        section.isExpanded ? "rotate-0" : "-rotate-90"
+                      }`}
+                    />
+                    <span className="text-sm font-medium text-gray-300">
+                      {section.title}
+                    </span>
+                    {section.logs.length > 0 && (
+                      <span className="text-xs text-gray-700">
+                        {section.logs.length} lines
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {section.duration && (
+                      <span className="text-xs text-gray-500 font-mono">
+                        {section.duration}
+                      </span>
+                    )}
+                    {getStatusBadge(section.status)}
+                  </div>
+                </button>
+
+                {section.isExpanded && section.logs.length > 0 && (
+                  <div className="border-t border-[#333333] p-4 max-h-96 overflow-y-auto bg-black">
+                    <div className="font-mono text-[13px] text-[#fafafa] space-y-0.5 leading-relaxed">
+                      {section.logs.map((log, index) => (
+                        <div
+                          key={index}
+                          dangerouslySetInnerHTML={{ __html: ansiToHtml(log) }}
+                        />
+                      ))}
+                      {section.status === "running" && <div ref={logsEndRef} />}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+        </div>
 
         {/* Error State */}
         {deploymentState.currentStep === "failed" && (
-          <div className="mt-8 bg-red-900/20 border border-red-500/30 rounded-lg p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <XCircleIcon className="w-6 h-6 text-red-400" />
-              <h3 className="text-lg font-medium text-red-400">Operation Failed</h3>
+          <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <XCircleIcon className="w-5 h-5 text-red-500" />
+              <h3 className="text-base font-medium text-red-400">
+                Operation Failed
+              </h3>
             </div>
-            <p className="text-red-300 text-sm mb-4">{deploymentState.error || "An error occurred during deployment"}</p>
+            <p className="text-sm text-gray-500 mb-4">
+              {deploymentState.error || "An error occurred during deployment"}
+            </p>
             <button
-              onClick={() => setDeploymentState(prev => ({ ...prev, currentStep: prev.imagePushed ? "built" : "not_started", error: null }))}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              onClick={() =>
+                setDeploymentState((prev) => ({
+                  ...prev,
+                  currentStep: prev.imagePushed ? "built" : "not_started",
+                  error: null,
+                }))
+              }
+              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm font-medium"
             >
-              Reset & Try Again
+              Try Again
             </button>
           </div>
         )}
-
-        {/* Success State */}
-        {deploymentState.deployed && (
-          <div className="mt-8 bg-green-900/20 border border-green-500/30 rounded-lg p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <CheckCircleIcon className="w-6 h-6 text-green-400" />
-              <h3 className="text-lg font-medium text-green-400">Deployment Successful!</h3>
-            </div>
-            <p className="text-green-300 text-sm mb-4">Your infrastructure is now live on AWS. Check the CloudFormation console for outputs like ALB DNS name.</p>
-            <a
-              href={`https://console.aws.amazon.com/cloudformation`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
-              <span>View in AWS Console</span>
-              <ExternalLinkIcon className="w-4 h-4" />
-            </a>
-          </div>
-        )}
       </div>
+
+      {/* Sirpi AI Assistant - Floating Chat */}
+      <SirpiAssistant
+        projectId={project.id}
+        allLogs={sections.flatMap((s) => s.logs)}
+      />
+
+      {/* AWS Setup Modal */}
+      <AWSSetupFlow
+        isVisible={showAWSSetup}
+        onComplete={handleAWSSetupComplete}
+        onClose={() => setShowAWSSetup(false)}
+        projectId={project?.id}
+      />
+
+      {/* Destroy Modal */}
+      {showDestroyConfirm && (
+        <div
+          className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowDestroyConfirm(false)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-6 max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/10 rounded-lg">
+                  <svg
+                    className="w-5 h-5 text-red-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-base font-semibold text-gray-200">
+                  Destroy Infrastructure
+                </h3>
+              </div>
+              <p className="text-sm text-gray-500 mb-4">
+                This will permanently delete all AWS resources. This cannot be
+                undone.
+              </p>
+              <div className="bg-red-500/5 border border-red-500/20 rounded-md p-3 mb-5">
+                <p className="text-xs text-red-400">
+                  <strong>Resources:</strong> VPC, Subnets, ECS, Load Balancer,
+                  Security Groups
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleDestroy}
+                  disabled={isDestroying}
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors font-medium text-sm"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => setShowDestroyConfirm(false)}
+                  className="flex-1 px-4 py-2 border border-[#333333] text-gray-400 rounded-md hover:bg-[#0d0d0d] transition-colors text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

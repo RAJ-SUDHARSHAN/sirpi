@@ -68,14 +68,33 @@ class TerraformGeneratorAgent(BaseBedrockAgent):
         # Get repo name from input_data if available
         repo_full_name = input_data.get("repo_full_name", None)
 
+        # Generate terraform files
         if template_type == "fargate" or template_type == "ecs-fargate":
-            return generate_fargate_terraform(context, project_id, repo_full_name)
+            files = generate_fargate_terraform(context, project_id, repo_full_name)
         elif template_type == "ec2":
-            return generate_fargate_terraform(context, project_id, repo_full_name)
+            files = generate_fargate_terraform(context, project_id, repo_full_name)
         elif template_type == "lambda":
-            return generate_fargate_terraform(context, project_id, repo_full_name)
+            files = generate_fargate_terraform(context, project_id, repo_full_name)
         else:
-            return generate_fargate_terraform(context, project_id, repo_full_name)
+            files = generate_fargate_terraform(context, project_id, repo_full_name)
+        
+        # Validate generated terraform
+        from src.agentcore.validators.terraform_validator import TerraformValidator
+        
+        validator = TerraformValidator()
+        validation_result = validator.validate(files)
+        
+        if not validation_result.valid:
+            error_msg = validation_result.format_errors()
+            logger.error(f"Terraform validation failed:\n{error_msg}")
+            raise ValueError(f"Generated Terraform is invalid:\n{error_msg}")
+        
+        if validation_result.has_warnings:
+            warning_msg = validation_result.format_warnings()
+            logger.warning(f"Terraform validation warnings:\n{warning_msg}")
+        
+        logger.info("✅ Terraform validation passed")
+        return files
 
     async def _generate_fargate_complete(
         self, session_id: str, context: RepositoryContext, thinking_callback: Optional[Callable]

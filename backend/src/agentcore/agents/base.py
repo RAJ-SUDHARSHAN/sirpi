@@ -74,11 +74,21 @@ class BaseBedrockAgent(ABC):
             try:
                 logger.info(f"Invoking {self.agent_name} (session: {session_id})")
                 
+                # Build sessionState for AgentCore Memory Primitive
+                # This allows agents to share context across invocations
+                session_state_param = {
+                    'sessionAttributes': {},  # Shared memory across agents
+                    'promptSessionAttributes': {}  # Per-prompt attributes
+                }
+                
+                logger.info(f"[AgentCore Memory Primitive] Invoking with sessionId={session_id}")
+                
                 response = self.bedrock_client.invoke_agent(
                     agentId=self.agent_id,
                     agentAliasId=self.agent_alias_id,
-                    sessionId=session_id,
+                    sessionId=session_id,  # ← AGENTCORE PRIMITIVE: Session-scoped memory
                     inputText=prompt,
+                    sessionState=session_state_param,  # ← AGENTCORE PRIMITIVE: Shared state!
                     enableTrace=enable_trace
                 )
                 

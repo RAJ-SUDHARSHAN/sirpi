@@ -264,30 +264,50 @@ function ProjectCard({
 }) {
   const router = useRouter();
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (project: Project) => {
+    // Prioritize deployment_status over generation status
+    const status = project.deployment_status || project.status;
+    
     switch (status.toLowerCase()) {
+      case "deployed":
       case "completed":
         return "#22c55e"; // green
+      case "deploying":
       case "generating":
       case "pending":
         return "#f59e0b"; // yellow
       case "failed":
+      case "deployment_failed":
         return "#ef4444"; // red
+      case "aws_verified":
+        return "#3b82f6"; // blue (ready to deploy)
       default:
         return "#6b7280"; // gray
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (project: Project) => {
+    // Prioritize deployment_status over generation status
+    const status = project.deployment_status || project.status;
+    
     switch (status.toLowerCase()) {
+      case "deployed":
+        return "Deployed";
+      case "deploying":
+        return "Deploying...";
+      case "aws_verified":
+        return "Ready to Deploy";
       case "completed":
-        return "Ready";
+        return "Generated";
       case "generating":
-        return "Building";
+        return "Generating...";
       case "pending":
         return "Pending";
       case "failed":
+      case "deployment_failed":
         return "Failed";
+      case "pr_merged":
+        return "PR Merged";
       default:
         return status;
     }
@@ -340,11 +360,11 @@ function ProjectCard({
         <div
           className="px-2 py-1 rounded-full text-xs font-medium"
           style={{
-            backgroundColor: `${getStatusColor(project.status)}20`,
-            color: getStatusColor(project.status),
+            backgroundColor: `${getStatusColor(project)}20`,
+            color: getStatusColor(project),
           }}
         >
-          {getStatusText(project.status)}
+          {getStatusText(project)}
         </div>
       </div>
 

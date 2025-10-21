@@ -246,6 +246,43 @@ async def stream_project_deployment_logs(operation_id: str):
     return EventSourceResponse(event_generator())
 
 
+@router.get("/deployment/projects/{project_id}/logs")
+async def get_project_deployment_logs(
+    project_id: str,
+    operation_type: str = None,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Get deployment logs for a project.
+    Optionally filter by operation_type (build_image, plan, apply, destroy).
+    """
+    try:
+        # Verify project ownership
+        project = supabase.get_project_by_id(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        if project["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Get logs
+        logs = supabase.get_deployment_logs(project_id, operation_type, limit=10)
+        
+        return {
+            "success": True,
+            "data": {
+                "logs": logs,
+                "count": len(logs)
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting deployment logs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get deployment logs")
+
+
 @router.get("/deployment/projects/{project_id}/status")
 async def get_project_deployment_status(
     project_id: str,
@@ -328,6 +365,21 @@ async def execute_docker_build(
             "completed_at": asyncio.get_event_loop().time(),
         })
         
+        # Save logs to database for persistence
+        try:
+            duration = int(session["completed_at"] - session["created_at"])
+            supabase.save_deployment_logs(
+                project_id=project_id,
+                operation_type="build_image",
+                logs=session.get("logs", []),
+                status="success" if result["success"] else "error",
+                duration_seconds=duration,
+                error_message=result.get("error") if not result["success"] else None,
+            )
+            logger.info(f"Saved Docker build logs to database")
+        except Exception as log_error:
+            logger.warning(f"Failed to save Docker build logs: {log_error}")
+        
         if result["success"]:
             logger.info(f"Docker build completed successfully for project {project_id}")
         else:
@@ -406,6 +458,38 @@ async def execute_project_deployment(
             "error": result.error,
             "completed_at": asyncio.get_event_loop().time(),
         })
+        
+        # Save terraform outputs to database if deployment succeeded
+        if result.success and result.outputs:
+            try:
+                logger.info(f"Saving terraform outputs: {list(result.outputs.keys())}")
+                # Extract clean output values (terraform outputs have 'value' field)
+                clean_outputs = {
+                    key: output.get('value') if isinstance(output, dict) else output
+                    for key, output in result.outputs.items()
+                }
+                supabase.save_terraform_outputs(
+                    project_id=project_id,
+                    outputs=clean_outputs
+                )
+                logger.info("Terraform outputs saved to database")
+            except Exception as output_error:
+                logger.warning(f"Failed to save terraform outputs: {output_error}")
+        
+        # Save logs to database for persistence
+        try:
+            duration = int(session["completed_at"] - session["created_at"])
+            supabase.save_deployment_logs(
+                project_id=project_id,
+                operation_type=operation,
+                logs=session.get("logs", []),
+                status="success" if result.success else "error",
+                duration_seconds=duration,
+                error_message=result.error if not result.success else None,
+            )
+            logger.info(f"Saved {len(session.get('logs', []))} logs to database")
+        except Exception as log_error:
+            logger.warning(f"Failed to save logs to database: {log_error}")
         
         # Update project deployment status in database
         if result.success:

@@ -1,32 +1,16 @@
--- =====================================================
--- SETUP: UUID Extension & Helper Functions
--- =====================================================
+-- ============================================================================
+-- Sirpi Database Schema
+-- ============================================================================
+-- Version: 1.0.0
+-- Description: Complete schema for Sirpi AI DevOps automation platform
+-- ============================================================================
 
+-- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Extract Clerk user ID from JWT (for RLS policies)
-CREATE OR REPLACE FUNCTION requesting_user_id()
-RETURNS TEXT AS $$
-  SELECT NULLIF(
-    current_setting('request.jwt.claims', true)::json->>'sub',
-    ''
-  )::text;
-$$ LANGUAGE SQL STABLE;
-
--- Auto-update timestamp trigger function
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- =====================================================
--- TABLES
--- =====================================================
-
--- Users (synced from Clerk via webhook)
+-- ============================================================================
+-- USERS TABLE
+-- ============================================================================
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     clerk_user_id TEXT UNIQUE NOT NULL,
@@ -37,7 +21,14 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- GitHub App Installations
+CREATE INDEX IF NOT EXISTS idx_users_clerk_user_id ON users(clerk_user_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+COMMENT ON TABLE users IS 'User accounts managed by Clerk authentication';
+
+-- ============================================================================
+-- GITHUB INSTALLATIONS TABLE
+-- ============================================================================
 CREATE TABLE IF NOT EXISTS github_installations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id TEXT NOT NULL,
@@ -46,12 +37,40 @@ CREATE TABLE IF NOT EXISTS github_installations (
     account_type TEXT NOT NULL,
     account_avatar_url TEXT,
     repositories JSONB DEFAULT '[]'::jsonb,
-    is_active BOOLEAN DEFAULT true,
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Projects (imported GitHub repositories)
+CREATE INDEX IF NOT EXISTS idx_github_installations_user_id ON github_installations(user_id);
+CREATE INDEX IF NOT EXISTS idx_github_installations_installation_id ON github_installations(installation_id);
+
+COMMENT ON TABLE github_installations IS 'GitHub App installations for repository access';
+
+-- ============================================================================
+-- AWS CONNECTIONS TABLE
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS aws_connections (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id TEXT UNIQUE NOT NULL,
+    role_arn TEXT,
+    external_id TEXT NOT NULL,
+    account_id TEXT,
+    status TEXT DEFAULT 'pending',
+    verified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_aws_connections_user_id ON aws_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_aws_connections_status ON aws_connections(status);
+
+COMMENT ON TABLE aws_connections IS 'AWS account connections for cross-account deployments';
+COMMENT ON COLUMN aws_connections.external_id IS 'Unique external ID for secure cross-account role assumption';
+
+-- ============================================================================
+-- PROJECTS TABLE
+-- ============================================================================
 CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id TEXT NOT NULL,
@@ -63,148 +82,125 @@ CREATE TABLE IF NOT EXISTS projects (
     installation_id BIGINT,
     language TEXT,
     description TEXT,
+    
+    -- Generation status
     status TEXT DEFAULT 'pending',
     generation_count INTEGER DEFAULT 0,
     last_generated_at TIMESTAMP WITH TIME ZONE,
+    
+    -- Deployment status
+    deployment_status TEXT,
+    deployment_started_at TIMESTAMP WITH TIME ZONE,
+    deployment_completed_at TIMESTAMP WITH TIME ZONE,
+    deployment_error TEXT,
+    
+    -- AWS connection
+    aws_connection_id UUID REFERENCES aws_connections(id),
+    aws_role_arn TEXT,
+    
+    -- Deployment outputs
+    application_url TEXT,
+    terraform_outputs JSONB,
+    deployment_summary JSONB,
+    
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
     UNIQUE(user_id, slug)
 );
 
--- Infrastructure Generations (AgentCore workflow results)
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+CREATE INDEX IF NOT EXISTS idx_projects_deployment_status ON projects(deployment_status);
+CREATE INDEX IF NOT EXISTS idx_projects_application_url ON projects(application_url) WHERE application_url IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_terraform_outputs ON projects USING GIN (terraform_outputs);
+
+COMMENT ON TABLE projects IS 'User projects with infrastructure generation and deployment tracking';
+COMMENT ON COLUMN projects.status IS 'Generation workflow status: pending, generating, completed, failed, pr_merged';
+COMMENT ON COLUMN projects.deployment_status IS 'Deployment status: aws_verified, deploying, deployed, failed';
+COMMENT ON COLUMN projects.application_url IS 'Direct URL to deployed application (extracted from ALB DNS)';
+
+-- ============================================================================
+-- GENERATIONS TABLE
+-- ============================================================================
 CREATE TABLE IF NOT EXISTS generations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id TEXT NOT NULL,
     session_id TEXT UNIQUE NOT NULL,
     repository_url TEXT NOT NULL,
     template_type TEXT NOT NULL,
-    status TEXT NOT NULL,
-    files JSONB DEFAULT '[]'::jsonb,
+    status TEXT DEFAULT 'started',
     project_context JSONB DEFAULT '{}'::jsonb,
+    s3_keys JSONB DEFAULT '[]'::jsonb,
     error TEXT,
+    
+    -- Link to project
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    
+    -- Pull request info
+    pr_number INTEGER,
+    pr_url TEXT,
+    pr_branch TEXT,
+    pr_merged BOOLEAN DEFAULT FALSE,
+    pr_merged_at TIMESTAMP WITH TIME ZONE,
+    
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- =====================================================
--- INDEXES
--- =====================================================
-
-CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_user_id);
-CREATE INDEX IF NOT EXISTS idx_installations_user_id ON github_installations(user_id);
-CREATE INDEX IF NOT EXISTS idx_installations_installation_id ON github_installations(installation_id);
-CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
-CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
 CREATE INDEX IF NOT EXISTS idx_generations_user_id ON generations(user_id);
 CREATE INDEX IF NOT EXISTS idx_generations_session_id ON generations(session_id);
-CREATE INDEX IF NOT EXISTS idx_aws_connections_user_id ON aws_connections(user_id);
-CREATE INDEX IF NOT EXISTS idx_aws_connections_external_id ON aws_connections(external_id);
+CREATE INDEX IF NOT EXISTS idx_generations_project_id ON generations(project_id);
+CREATE INDEX IF NOT EXISTS idx_generations_status ON generations(status);
 
--- =====================================================
--- ROW LEVEL SECURITY (RLS)
--- =====================================================
+COMMENT ON TABLE generations IS 'Infrastructure generation history and session tracking';
+COMMENT ON COLUMN generations.session_id IS 'AgentCore session ID for multi-agent collaboration';
 
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE github_installations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE generations ENABLE ROW LEVEL SECURITY;
-
--- Users policies
-DROP POLICY IF EXISTS users_select_own ON users;
-DROP POLICY IF EXISTS users_insert_own ON users;
-DROP POLICY IF EXISTS users_update_own ON users;
-
-CREATE POLICY users_select_own ON users
-    FOR SELECT USING (clerk_user_id = requesting_user_id());
-CREATE POLICY users_insert_own ON users
-    FOR INSERT WITH CHECK (clerk_user_id = requesting_user_id());
-CREATE POLICY users_update_own ON users
-    FOR UPDATE USING (clerk_user_id = requesting_user_id());
-
--- GitHub installations policies
-DROP POLICY IF EXISTS installations_select_own ON github_installations;
-DROP POLICY IF EXISTS installations_insert_own ON github_installations;
-DROP POLICY IF EXISTS installations_update_own ON github_installations;
-
-CREATE POLICY installations_select_own ON github_installations
-    FOR SELECT USING (user_id = requesting_user_id());
-CREATE POLICY installations_insert_own ON github_installations
-    FOR INSERT WITH CHECK (user_id = requesting_user_id());
-CREATE POLICY installations_update_own ON github_installations
-    FOR UPDATE USING (user_id = requesting_user_id());
-
--- Projects policies
-DROP POLICY IF EXISTS projects_select_own ON projects;
-DROP POLICY IF EXISTS projects_insert_own ON projects;
-DROP POLICY IF EXISTS projects_update_own ON projects;
-DROP POLICY IF EXISTS projects_delete_own ON projects;
-
-CREATE POLICY projects_select_own ON projects
-    FOR SELECT USING (user_id = requesting_user_id());
-CREATE POLICY projects_insert_own ON projects
-    FOR INSERT WITH CHECK (user_id = requesting_user_id());
-CREATE POLICY projects_update_own ON projects
-    FOR UPDATE USING (user_id = requesting_user_id());
-CREATE POLICY projects_delete_own ON projects
-    FOR DELETE USING (user_id = requesting_user_id());
-
--- Generations policies
-DROP POLICY IF EXISTS generations_select_own ON generations;
-DROP POLICY IF EXISTS generations_insert_own ON generations;
-DROP POLICY IF EXISTS generations_update_own ON generations;
-
-CREATE POLICY generations_select_own ON generations
-    FOR SELECT USING (user_id = requesting_user_id());
-CREATE POLICY generations_insert_own ON generations
-    FOR INSERT WITH CHECK (user_id = requesting_user_id());
-CREATE POLICY generations_update_own ON generations
-    FOR UPDATE USING (user_id = requesting_user_id());
-
--- AWS Connections (for cross-account deployment)
-CREATE TABLE IF NOT EXISTS aws_connections (
+-- ============================================================================
+-- DEPLOYMENT LOGS TABLE
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS deployment_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id TEXT NOT NULL,
-    external_id TEXT UNIQUE NOT NULL,
-    role_arn TEXT,
-    status TEXT DEFAULT 'pending',
-    verified_at TIMESTAMP WITH TIME ZONE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    operation_type TEXT NOT NULL,
+    logs JSONB DEFAULT '[]'::jsonb,
+    status TEXT NOT NULL,
+    duration_seconds INTEGER,
+    error_message TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(user_id)
+    completed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- AWS connections policies
-DROP POLICY IF EXISTS aws_connections_select_own ON aws_connections;
-DROP POLICY IF EXISTS aws_connections_insert_own ON aws_connections;
-DROP POLICY IF EXISTS aws_connections_update_own ON aws_connections;
+CREATE INDEX IF NOT EXISTS idx_deployment_logs_project_id ON deployment_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_deployment_logs_operation_type ON deployment_logs(operation_type);
+CREATE INDEX IF NOT EXISTS idx_deployment_logs_created_at ON deployment_logs(created_at DESC);
 
-CREATE POLICY aws_connections_select_own ON aws_connections
-    FOR SELECT USING (user_id = requesting_user_id());
-CREATE POLICY aws_connections_insert_own ON aws_connections
-    FOR INSERT WITH CHECK (user_id = requesting_user_id());
-CREATE POLICY aws_connections_update_own ON aws_connections
-    FOR UPDATE USING (user_id = requesting_user_id());
+COMMENT ON TABLE deployment_logs IS 'Deployment operation logs for debugging and audit trail';
+COMMENT ON COLUMN deployment_logs.operation_type IS 'Type: build_image, plan, apply, destroy';
 
--- =====================================================
--- TRIGGERS
--- =====================================================
+-- ============================================================================
+-- TRIGGERS FOR AUTO-UPDATE TIMESTAMPS
+-- ============================================================================
 
-DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-DROP TRIGGER IF EXISTS update_installations_updated_at ON github_installations;
-DROP TRIGGER IF EXISTS update_projects_updated_at ON projects;
-DROP TRIGGER IF EXISTS update_generations_updated_at ON generations;
-DROP TRIGGER IF EXISTS update_aws_connections_updated_at ON aws_connections;
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_installations_updated_at BEFORE UPDATE ON github_installations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_projects_updated_at BEFORE UPDATE ON projects
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_generations_updated_at BEFORE UPDATE ON generations
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_github_installations_updated_at BEFORE UPDATE ON github_installations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_aws_connections_updated_at BEFORE UPDATE ON aws_connections

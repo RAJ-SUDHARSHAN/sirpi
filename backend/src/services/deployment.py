@@ -416,6 +416,7 @@ export AWS_DEFAULT_REGION="{settings.aws_region}"
                     
                     # Get outputs
                     add_log("📊 Retrieving terraform outputs...")
+                    outputs = None
                     try:
                         output_result = sandbox.commands.run(
                             "cd /home/user/terraform && source /tmp/aws_creds.sh && terraform output -json"
@@ -425,14 +426,70 @@ export AWS_DEFAULT_REGION="{settings.aws_region}"
                             outputs = json.loads(output_result.stdout)
                             add_log(f"✅ Retrieved {len(outputs)} outputs")
                             
-                            sandbox.kill()
-                            return DeploymentResult(
-                                success=True, 
-                                logs=logs, 
-                                outputs=outputs
-                            )
+                            # FIRST: Save outputs to database (priority!)
+                            try:
+                                logger.info(f"Saving terraform outputs: {list(outputs.keys())}")
+                                clean_outputs = {
+                                    key: output.get('value') if isinstance(output, dict) else output
+                                    for key, output in outputs.items()
+                                }
+                                supabase.save_terraform_outputs(
+                                    project_id=project_id,
+                                    outputs=clean_outputs
+                                )
+                                
+                                # Extract and save application URL directly
+                                alb_dns = clean_outputs.get('alb_dns_name')
+                                if alb_dns:
+                                    supabase.update_application_url(project_id, alb_dns)
+                                    logger.info(f"✅ Application URL saved: {alb_dns}")
+                                
+                                logger.info("✅ Terraform outputs saved to database")
+                                add_log("✅ Application URL saved to database")
+                            except Exception as output_error:
+                                logger.error(f"Failed to save terraform outputs: {output_error}")
+                                add_log(f"⚠️  Failed to save outputs: {output_error}")
+                            
+                            # SECOND: Try to generate deployment summary (optional)
+                            add_log("📝 Generating deployment summary...")
+                            try:
+                                from src.services.deployment_summary import DeploymentSummaryFormatter
+                                
+                                formatter = DeploymentSummaryFormatter()
+                                
+                                # Get all apply logs
+                                apply_logs = "\n".join(logs)
+                                
+                                # Parse summary
+                                summary = formatter.parse_terraform_output(
+                                    apply_logs,
+                                    repo_name=repo
+                                )
+                                
+                                # Save summary to database
+                                summary_json = formatter.format_summary_json(summary)
+                                
+                                with supabase.get_connection() as conn:
+                                    with conn.cursor() as cur:
+                                        from psycopg2.extras import Json
+                                        cur.execute(
+                                            """
+                                            UPDATE projects
+                                            SET deployment_summary = %s,
+                                                updated_at = NOW()
+                                            WHERE id = %s
+                                            """,
+                                            (Json(summary_json), project_id)
+                                        )
+                                
+                                add_log(f"✅ Deployment summary saved ({summary.total_resources} resources)")
+                                
+                            except Exception as e:
+                                logger.warning(f"Failed to generate deployment summary: {e}")
+                                add_log(f"⚠️  Could not generate summary (outputs still saved): {str(e)}")
                     except Exception as e:
                         logger.warning(f"Failed to get outputs: {e}")
+                        add_log(f"⚠️  Could not retrieve outputs: {str(e)}")
                     
                     sandbox.kill()
                     return DeploymentResult(success=True, logs=logs)
@@ -777,6 +834,86 @@ export AWS_DEFAULT_REGION="{settings.aws_region}"
             
             if destroy_result.exit_code == 0:
                 add_log("✅ Infrastructure destroyed successfully")
+                
+                # Clean up state file from S3 (demo-friendly)
+                add_log("🧹 Cleaning up Terraform state file...")
+                try:
+                    if account_id:
+                        state_bucket = f"sirpi-terraform-states-{account_id}"
+                        state_key = f"states/{project_id}/terraform.tfstate"
+                        
+                        s3_client = boto3.client(
+                            's3',
+                            aws_access_key_id=credentials['AccessKeyId'],
+                            aws_secret_access_key=credentials['SecretAccessKey'],
+                            aws_session_token=credentials['SessionToken'],
+                            region_name=settings.aws_region
+                        )
+                        
+                        # Delete all versions of the state file
+                        try:
+                            versions = s3_client.list_object_versions(
+                                Bucket=state_bucket,
+                                Prefix=state_key
+                            )
+                            
+                            # Delete all versions
+                            for version in versions.get('Versions', []):
+                                s3_client.delete_object(
+                                    Bucket=state_bucket,
+                                    Key=state_key,
+                                    VersionId=version['VersionId']
+                                )
+                            
+                            # Delete all delete markers
+                            for marker in versions.get('DeleteMarkers', []):
+                                s3_client.delete_object(
+                                    Bucket=state_bucket,
+                                    Key=state_key,
+                                    VersionId=marker['VersionId']
+                                )
+                            
+                            add_log(f"✅ Deleted state file: {state_key}")
+                        except Exception as version_error:
+                            add_log(f"⚠️  Could not delete state versions: {version_error}")
+                    
+                except Exception as cleanup_error:
+                    logger.warning(f"State cleanup failed: {cleanup_error}")
+                    add_log(f"⚠️  State cleanup warning: {cleanup_error}")
+                    add_log("⚠️  You may need to empty S3 bucket manually before deleting CloudFormation stack")
+                
+                # Update project status in database
+                add_log("📊 Updating project status...")
+                try:
+                    supabase.update_project_deployment_status(
+                        project_id=project_id,
+                        status='destroyed',
+                        error=None
+                    )
+                    
+                    # Clear application URL and terraform outputs
+                    with supabase.get_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                """
+                                UPDATE projects
+                                SET application_url = NULL,
+                                    terraform_outputs = NULL,
+                                    deployment_summary = NULL,
+                                    deployment_completed_at = NOW(),
+                                    updated_at = NOW()
+                                WHERE id = %s
+                                """,
+                                (project_id,)
+                            )
+                    
+                    add_log("✅ Project status updated to 'destroyed'")
+                    add_log("✅ Application URL and outputs cleared")
+                except Exception as db_error:
+                    logger.error(f"Failed to update project status: {db_error}")
+                    add_log(f"⚠️  Could not update database: {db_error}")
+                
+                add_log("🎉 All resources cleaned up successfully!")
                 return DeploymentResult(success=True, logs=logs)
             else:
                 add_log("❌ Destroy failed")

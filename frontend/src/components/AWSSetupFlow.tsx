@@ -130,9 +130,9 @@ export default function AWSSetupFlow({
   if (!isVisible) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="border-b border-gray-800 p-6">
+    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="border-b border-[#333333] p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-white">
               Connect AWS Account
@@ -207,17 +207,17 @@ export default function AWSSetupFlow({
             {currentStep === 1 && (
               <div className="space-y-4">
                 {urlError && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
                     <div className="flex items-start gap-3">
-                      <ExclamationCircleIcon className="w-5 h-5 text-red-600 mt-0.5" />
+                      <ExclamationCircleIcon className="w-5 h-5 text-red-400 mt-0.5" />
                       <div>
-                        <h4 className="text-sm font-medium text-red-900 mb-1">
+                        <h4 className="text-sm font-medium text-red-300 mb-1">
                           Failed to Generate CloudFormation URL
                         </h4>
-                        <p className="text-sm text-red-800">{urlError}</p>
+                        <p className="text-sm text-red-200">{urlError}</p>
                         <button
                           onClick={generateCloudFormationUrl}
-                          className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+                          className="mt-2 text-sm text-red-400 hover:text-red-300 underline"
                         >
                           Try Again
                         </button>
@@ -226,14 +226,14 @@ export default function AWSSetupFlow({
                   </div>
                 )}
 
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="bg-blue-500/10 border border-blue-400/30 rounded-lg p-4">
                   <div className="flex items-start gap-3">
-                    <ExclamationCircleIcon className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <ExclamationCircleIcon className="w-5 h-5 text-blue-400 mt-0.5" />
                     <div>
-                      <h4 className="text-sm font-medium text-blue-900 mb-1">
+                      <h4 className="text-sm font-medium text-blue-300 mb-1">
                         Important: AWS Console Login Required
                       </h4>
-                      <p className="text-sm text-blue-800">
+                      <p className="text-sm text-blue-200">
                         Make sure you&apos;re logged into the correct AWS
                         account before clicking the button below. You&apos;ll be
                         redirected to AWS Console.
@@ -242,11 +242,11 @@ export default function AWSSetupFlow({
                   </div>
                 </div>
 
-                <div className="bg-gray-800 rounded-lg p-4">
-                  <h4 className="text-sm font-medium text-white mb-2">
+                <div className="bg-[#111111] border border-[#333333] rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-gray-200 mb-2">
                     What happens next:
                   </h4>
-                  <ul className="text-sm text-gray-300 space-y-1">
+                  <ul className="text-sm text-gray-400 space-y-1">
                     <li>• AWS Console opens in a new tab</li>
                     <li>• CloudFormation template is pre-loaded</li>
                     <li>• All parameters are pre-filled</li>
@@ -260,7 +260,7 @@ export default function AWSSetupFlow({
                 <button
                   onClick={() => window.open(cloudFormationUrl, "_blank")}
                   disabled={!cloudFormationUrl}
-                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-4 px-6 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                  className="w-full bg-white text-black hover:bg-gray-100 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed py-4 px-6 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                 >
                   <ExternalLinkIcon className="w-5 h-5" />
                   {!cloudFormationUrl
@@ -270,10 +270,10 @@ export default function AWSSetupFlow({
 
                 {cloudFormationUrl && (
                   <details className="mt-2">
-                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
                       View Generated URL (for debugging)
                     </summary>
-                    <div className="mt-2 p-2 bg-gray-100 rounded text-xs font-mono break-all">
+                    <div className="mt-2 p-2 bg-black border border-[#333333] rounded text-xs font-mono break-all text-gray-400">
                       {cloudFormationUrl}
                     </div>
                   </details>
@@ -321,14 +321,14 @@ export default function AWSSetupFlow({
 
             {currentStep === 2 && (
               <div className="space-y-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="bg-green-500/10 border border-green-400/30 rounded-lg p-4">
                   <div className="flex items-start gap-3">
-                    <CheckCircleIcon className="w-5 h-5 text-green-600 mt-0.5" />
+                    <CheckCircleIcon className="w-5 h-5 text-green-300 mt-0.5" />
                     <div>
-                      <h4 className="text-sm font-medium text-green-900 mb-1">
+                      <h4 className="text-sm font-medium text-green-300 mb-1">
                         CloudFormation Stack Created!
                       </h4>
-                      <p className="text-sm text-green-800">
+                      <p className="text-sm text-green-200">
                         Now copy the Role ARN from the stack outputs and paste
                         it below.
                       </p>
@@ -345,9 +345,9 @@ export default function AWSSetupFlow({
                     value={roleArn}
                     onChange={(e) => setRoleArn(e.target.value)}
                     placeholder="arn:aws:iam::123456789:role/SirpiDeploymentRole"
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-black border border-[#333333] rounded-md text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   />
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     You can find this in the CloudFormation stack Outputs tab
                   </p>
                 </div>
@@ -355,7 +355,7 @@ export default function AWSSetupFlow({
                 <button
                   onClick={handleVerifyConnection}
                   disabled={!roleArn.trim() || isVerifying}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-6 rounded-lg font-medium transition-colors"
+                  className="w-full bg-white text-black hover:bg-gray-100 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed py-3 px-6 rounded-lg font-medium transition-colors"
                 >
                   {isVerifying ? "Verifying..." : "Verify & Connect"}
                 </button>
@@ -364,7 +364,7 @@ export default function AWSSetupFlow({
           </div>
 
           {/* Navigation */}
-          <div className="flex justify-between mt-8 pt-6 border-t border-gray-800">
+          <div className="flex justify-between mt-8 pt-6 border-t border-[#333333]">
             <button
               onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
               disabled={currentStep === 0}
@@ -376,7 +376,7 @@ export default function AWSSetupFlow({
             {currentStep < steps.length - 1 && (
               <button
                 onClick={handleNext}
-                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                className="px-4 py-2 text-sm bg-white text-black hover:bg-gray-100 rounded transition-colors"
               >
                 Next
               </button>

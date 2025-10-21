@@ -15,6 +15,7 @@ from src.api import (
     github_webhooks,
     deployments,
     aws,
+    sirpi_assistant,
 )
 from src.utils.logging_config import setup_logging
 
@@ -55,6 +56,7 @@ app.include_router(pull_requests.router, prefix=settings.api_v1_prefix, tags=["P
 app.include_router(github_webhooks.router, prefix=settings.api_v1_prefix, tags=["GitHub Webhooks"])
 app.include_router(deployments.router, prefix=settings.api_v1_prefix, tags=["Deployments"])
 app.include_router(aws.router, prefix=settings.api_v1_prefix, tags=["AWS Setup"])
+app.include_router(sirpi_assistant.router, prefix=settings.api_v1_prefix, tags=["AI Assistant"])
 
 
 @app.exception_handler(Exception)

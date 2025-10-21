@@ -71,6 +71,37 @@ class DockerfileGeneratorAgent(BaseBedrockAgent):
 
     def _build_dockerfile_prompt(self, context: RepositoryContext) -> str:
         """Build context-aware Dockerfile prompt (enhance existing or create new)."""
+        
+        # Critical requirements that apply to ALL Dockerfiles
+        CRITICAL_REQUIREMENTS = """🚨 CRITICAL REQUIREMENTS (NON-NEGOTIABLE):
+
+1. NO PLACEHOLDERS OR TODOS
+   ❌ PLACEHOLDER, TODO, FIXME, XXX, CHANGEME
+   ✅ All values must be real or use ARG/ENV variables
+
+2. NO HARDCODED VALUES (use ARG/ENV)
+   ❌ EXPOSE 3000
+   ✅ ARG PORT=3000
+       EXPOSE $PORT
+
+3. SECURITY REQUIREMENTS
+   ✅ Must create and use non-root user
+   ✅ No secrets, API keys, or credentials
+   ✅ Use specific version tags (NOT :latest)
+
+4. PRODUCTION-READY
+   ✅ Multi-stage build (builder + runner)
+   ✅ Only production dependencies in final image
+   ✅ Proper layer caching (COPY package files first)
+   ✅ HEALTHCHECK instruction included
+
+5. MUST WORK WITHOUT MODIFICATION
+   ✅ Complete, runnable Dockerfile
+   ✅ All dependencies installable
+   ✅ No manual edits needed
+
+VERIFY: Your Dockerfile must pass 'docker build' successfully.
+"""
 
         # Package manager and framework-specific instructions
         package_manager_instructions = self._get_package_manager_instructions(context)
@@ -81,6 +112,8 @@ class DockerfileGeneratorAgent(BaseBedrockAgent):
             return f"""EXISTING DOCKERFILE DETECTED
 
 Repository already contains a Dockerfile. Your task is to ANALYZE and ENHANCE it.
+
+{CRITICAL_REQUIREMENTS}
 
 EXISTING DOCKERFILE:
 ```dockerfile
@@ -139,6 +172,8 @@ IMPORTANT: Generate ONLY the enhanced Dockerfile content.
 """
         else:
             return f"""Generate a production-ready Dockerfile for this application.
+
+{CRITICAL_REQUIREMENTS}
 
 NO EXISTING DOCKERFILE FOUND - Creating from scratch.
 

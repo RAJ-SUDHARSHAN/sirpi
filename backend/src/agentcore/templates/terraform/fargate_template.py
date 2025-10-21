@@ -23,6 +23,9 @@ def generate_fargate_terraform(context: RepositoryContext, project_id: str, repo
         # Fallback to project_id if repo name not provided
         repo_name = f"app-{project_id[:8]}"
     
+    # Use repo_name as the default app_name to avoid "myapp" everywhere
+    app_name = repo_name
+    
     files = {}
     
     # main.tf
@@ -337,7 +340,7 @@ resource "aws_lb_listener" "http" {{
 variable "app_name" {{
   description = "Application name (used for resource naming)"
   type        = string
-  default     = "myapp"
+  default     = "{app_name}"
 }}
 
 variable "ecr_repository_name" {{
@@ -389,9 +392,9 @@ variable "desired_count" {{
 }}
 
 variable "acm_certificate_arn" {{
-  description = "ARN of ACM certificate for HTTPS listener. Leave as placeholder to deploy HTTP-only (not recommended for production)"
+  description = "ARN of ACM certificate for HTTPS listener. Set enable_https=true and provide valid ARN to enable HTTPS"
   type        = string
-  default     = "arn:aws:acm:REGION:ACCOUNT:certificate/PLACEHOLDER"
+  default     = ""
 }}
 
 variable "enable_https" {{

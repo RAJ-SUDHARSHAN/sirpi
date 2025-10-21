@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import Image from "next/image";
 
 export function ConditionalHeader() {
   const pathname = usePathname();
@@ -48,7 +49,8 @@ export function ConditionalHeader() {
           {/* Logo */}
           <Link href="/" className="flex items-center cursor-pointer">
             <div className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-              Sirpi
+              {/* Sirpi */}
+              <Image src="/sirpi-logo-horizontal.png" alt="Sirpi" height={24} width={100} />
             </div>
           </Link>
 

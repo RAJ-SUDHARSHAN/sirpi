@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 
 interface DeploymentLogsProps {
   sessionId: string;
@@ -27,7 +27,7 @@ export default function DeploymentLogs({
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const connectToLogs = () => {
+  const connectToLogs = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
@@ -60,7 +60,7 @@ export default function DeploymentLogs({
       console.error("EventSource error:", error);
       setIsConnected(false);
     };
-  };
+  }, [sessionId]);
 
   const disconnectFromLogs = () => {
     if (eventSourceRef.current) {

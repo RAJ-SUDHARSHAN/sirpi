@@ -4,7 +4,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useParams, useRouter } from "next/navigation";
 import { apiCall } from "@/lib/api-client";
@@ -13,12 +13,9 @@ import {
   ExternalLinkIcon,
   PlayIcon,
   CheckCircleIcon,
-  ClockIcon,
   RefreshIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
   XCircleIcon,
-  DownloadIcon,
 } from "@/components/ui/icons";
 import {
   Project,
@@ -125,7 +122,11 @@ export default function ProjectPage() {
   const [generationId, setGenerationId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (workflowState.status === "analyzing" || workflowState.status === "generating" || workflowState.status === "started") {
+    if (
+      workflowState.status === "analyzing" ||
+      workflowState.status === "generating" ||
+      workflowState.status === "started"
+    ) {
       setShowLogs(true);
     }
   }, [workflowState.status]);
@@ -134,11 +135,13 @@ export default function ProjectPage() {
     if (showLogs && logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [workflowState.logs, showLogs]);
+  }, [showLogs]);
 
   useEffect(() => {
     if (user) {
-      const expectedNamespace = getUserProjectNamespace(user as any);
+      const expectedNamespace = getUserProjectNamespace(
+        user as unknown as Record<string, unknown>
+      );
       if (userProjects !== expectedNamespace) {
         router.replace(`/${expectedNamespace}/${projectSlug}`);
         return;
@@ -146,45 +149,7 @@ export default function ProjectPage() {
     }
   }, [user, userProjects, projectSlug, router]);
 
-  useEffect(() => {
-    async function loadProject() {
-      try {
-        setIsLoading(true);
-
-        const [overview, installation] = await Promise.all([
-          projectsApi.getUserOverview(),
-          githubApi.getInstallation(),
-        ]);
-
-        if (installation) {
-          setInstallationId(installation.installation_id);
-        }
-
-        if (overview) {
-          const foundProject = (overview as { projects: { items: Project[] } }).projects.items.find(
-            (p: Project) => p.slug === projectSlug
-          );
-
-          if (foundProject) {
-            setProject(foundProject);
-            await restoreGenerationState(foundProject.id);
-          } else {
-            router.push(`/${userProjects}`);
-          }
-        }
-      } catch {
-        router.push(`/${userProjects}`);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    if (user && projectSlug && userProjects) {
-      loadProject();
-    }
-  }, [user, projectSlug, userProjects, router]);
-
-  const restoreGenerationState = async (projectId: string) => {
+  const restoreGenerationState = useCallback(async (projectId: string) => {
     try {
       setIsRestoringState(true);
 
@@ -212,7 +177,9 @@ export default function ProjectPage() {
         }
 
         if (generation.status === "completed") {
-          const restoredFiles = Array.isArray(generation.files) ? generation.files : [];
+          const restoredFiles = Array.isArray(generation.files)
+            ? generation.files
+            : [];
           setWorkflowState({
             status: "completed",
             message: "Infrastructure generated successfully!",
@@ -234,7 +201,45 @@ export default function ProjectPage() {
     } finally {
       setIsRestoringState(false);
     }
-  };
+  }, []);
+
+  const loadProject = useCallback(async () => {
+    try {
+      setIsLoading(true);
+
+      const [overview, installation] = await Promise.all([
+        projectsApi.getUserOverview(),
+        githubApi.getInstallation(),
+      ]);
+
+      if (installation) {
+        setInstallationId(installation.installation_id);
+      }
+
+      if (overview) {
+        const foundProject = (
+          overview as { projects: { items: Project[] } }
+        ).projects.items.find((p: Project) => p.slug === projectSlug);
+
+        if (foundProject) {
+          setProject(foundProject);
+          await restoreGenerationState(foundProject.id);
+        } else {
+          router.push(`/${userProjects}`);
+        }
+      }
+    } catch {
+      router.push(`/${userProjects}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectSlug, userProjects, router, restoreGenerationState]);
+
+  useEffect(() => {
+    if (projectSlug && userProjects) {
+      loadProject();
+    }
+  }, [loadProject, projectSlug, userProjects]);
 
   useEffect(() => {
     return () => {
@@ -294,7 +299,10 @@ export default function ProjectPage() {
         setWorkflowState((prev) => ({
           ...prev,
           status: data.status === "completed" ? "completed" : "failed",
-          message: data.status === "completed" ? "Infrastructure generated successfully!" : "Generation failed",
+          message:
+            data.status === "completed"
+              ? "Infrastructure generated successfully!"
+              : "Generation failed",
           progress: 100,
           files: data.files || [],
           error: data.error,
@@ -304,11 +312,13 @@ export default function ProjectPage() {
 
         if (data.status === "completed" && project) {
           try {
-            const generation = await workflowApi.getGenerationByProject(project.id);
+            const generation = await workflowApi.getGenerationByProject(
+              project.id
+            );
             if (generation?.id) {
               setGenerationId(generation.id);
             }
-          } catch (error) {
+          } catch {
             // Continue
           }
         }
@@ -350,7 +360,10 @@ export default function ProjectPage() {
 
   const handleDownloadZip = async () => {
     if (!workflowState.files?.length) return;
-    await downloadFilesAsZip(workflowState.files, `${project?.name || "infrastructure"}-files.zip`);
+    await downloadFilesAsZip(
+      workflowState.files,
+      `${project?.name || "infrastructure"}-files.zip`
+    );
   };
 
   const handleCreatePR = async () => {
@@ -385,10 +398,15 @@ export default function ProjectPage() {
         setProject(updatedProject);
       }
 
-      toast.success(`Pull request #${result.pr_number} created!`, { id: "create-pr" });
+      toast.success(`Pull request #${result.pr_number} created!`, {
+        id: "create-pr",
+      });
       window.open(result.pr_url, "_blank");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create PR", { id: "create-pr" });
+      toast.error(
+        error instanceof Error ? error.message : "Failed to create PR",
+        { id: "create-pr" }
+      );
     } finally {
       setIsCreatingPR(false);
     }
@@ -419,7 +437,7 @@ export default function ProjectPage() {
           toast.success("AWS account connected!");
         }
       }
-    } catch (error) {
+    } catch {
       toast.error("Failed to connect AWS");
     }
   };
@@ -436,7 +454,9 @@ export default function ProjectPage() {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-xl font-semibold text-gray-200 mb-4">Project Not Found</h1>
+          <h1 className="text-xl font-semibold text-gray-200 mb-4">
+            Project Not Found
+          </h1>
           <button
             onClick={() => router.push(`/${userProjects}`)}
             className="px-4 py-2 bg-white text-black rounded-md hover:bg-gray-100 text-sm font-medium"
@@ -448,18 +468,17 @@ export default function ProjectPage() {
     );
   }
 
-  const isPRMerged = project.status === "pr_merged" || project.deployment_status === "pr_merged";
-  const isAWSVerified = project.deployment_status === "aws_verified" || 
-                       project.deployment_status === "deployed" || 
-                       project.deployment_status === "completed";
+  const isPRMerged =
+    project.status === "pr_merged" || project.deployment_status === "pr_merged";
 
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="max-w-7xl mx-auto px-6 py-8">
-
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-white mb-2">{project.name}</h1>
+            <h1 className="text-3xl font-bold text-white mb-2">
+              {project.name}
+            </h1>
             <div className="flex items-center gap-6 text-sm text-gray-400">
               <div className="flex items-center gap-2">
                 <GitHubIcon className="w-4 h-4" />
@@ -494,16 +513,22 @@ export default function ProjectPage() {
           <div className="mb-8 bg-[#0a0a0a] border border-[#333333] rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                {workflowState.status === "generating" || workflowState.status === "started" || workflowState.status === "analyzing" ? (
+                {workflowState.status === "generating" ||
+                workflowState.status === "started" ||
+                workflowState.status === "analyzing" ? (
                   <div className="w-5 h-5 border-2 border-gray-700 border-t-gray-400 rounded-full animate-spin" />
                 ) : workflowState.status === "completed" ? (
                   <CheckCircleIcon className="w-5 h-5 text-green-300" />
                 ) : (
                   <XCircleIcon className="w-5 h-5 text-red-500" />
                 )}
-                <span className="font-medium text-gray-200">{workflowState.message}</span>
+                <span className="font-medium text-gray-200">
+                  {workflowState.message}
+                </span>
               </div>
-              <span className="text-sm text-gray-400">{workflowState.progress}%</span>
+              <span className="text-sm text-gray-400">
+                {workflowState.progress}%
+              </span>
             </div>
             <div className="w-full bg-[#1a1a1a] rounded-full h-2">
               <div
@@ -548,14 +573,18 @@ export default function ProjectPage() {
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
-                            <h3 className="text-lg font-medium text-white">{template.name}</h3>
+                            <h3 className="text-lg font-medium text-white">
+                              {template.name}
+                            </h3>
                             {template.recommended && (
                               <span className="px-3 py-1 bg-blue-600 text-white text-xs rounded-full">
                                 Recommended
                               </span>
                             )}
                           </div>
-                          <p className="text-gray-400 text-sm mb-3">{template.description}</p>
+                          <p className="text-gray-400 text-sm mb-3">
+                            {template.description}
+                          </p>
                           <div className="flex flex-wrap gap-2">
                             {template.features.map((feature) => (
                               <span
@@ -604,7 +633,9 @@ export default function ProjectPage() {
               <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <XCircleIcon className="w-6 h-6 text-red-400" />
-                  <h3 className="text-lg font-medium text-red-400">Generation Failed</h3>
+                  <h3 className="text-lg font-medium text-red-400">
+                    Generation Failed
+                  </h3>
                 </div>
                 <p className="text-sm text-gray-300 mb-4">
                   {workflowState.error || "An error occurred"}
@@ -643,7 +674,9 @@ export default function ProjectPage() {
                     {/* AgentCore Indicator */}
                     <div className="flex items-center gap-1.5 px-2 py-0.5 bg-purple-500/20 border border-purple-400/30 rounded-full">
                       <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse" />
-                      <span className="text-xs text-purple-300 font-medium">AgentCore Memory</span>
+                      <span className="text-xs text-purple-300 font-medium">
+                        AgentCore Memory
+                      </span>
                     </div>
                   </div>
                   <ChevronDownIcon
@@ -656,18 +689,33 @@ export default function ProjectPage() {
                 {showLogs && (
                   <div className="px-4 py-4 bg-black max-h-96 overflow-y-auto font-mono text-sm border-t border-[#333333]">
                     {workflowState.logs.map((log, idx) => (
-                      <div key={idx} className="flex items-start gap-3 mb-2 text-gray-300">
+                      <div
+                        key={idx}
+                        className="flex items-start gap-3 mb-2 text-gray-300"
+                      >
                         <span className="text-gray-500 text-xs min-w-[80px]">
                           {new Date(log.timestamp).toLocaleTimeString()}
                         </span>
-                        <span className={`text-xs uppercase font-semibold min-w-[120px] ${
-                          log.level === "ERROR" ? "text-red-400" :
-                          log.level === "THINKING" ? "text-green-400" :
-                          log.agent === "orchestrator" ? "text-blue-400" : "text-yellow-400"
-                        }`}>
+                        <span
+                          className={`text-xs uppercase font-semibold min-w-[120px] ${
+                            log.level === "ERROR"
+                              ? "text-red-400"
+                              : log.level === "THINKING"
+                              ? "text-green-400"
+                              : log.agent === "orchestrator"
+                              ? "text-blue-400"
+                              : "text-yellow-400"
+                          }`}
+                        >
                           [{log.agent}]
                         </span>
-                        <span className={`flex-1 ${log.level === "THINKING" ? "text-green-300 italic" : "text-gray-300"}`}>
+                        <span
+                          className={`flex-1 ${
+                            log.level === "THINKING"
+                              ? "text-green-300 italic"
+                              : "text-gray-300"
+                          }`}
+                        >
                           {log.message}
                         </span>
                       </div>
@@ -680,7 +728,10 @@ export default function ProjectPage() {
 
             {/* Generated Files */}
             {workflowState.files.length > 0 && (
-              <FilePreviewTabs files={workflowState.files} onDownloadAll={handleDownloadZip} />
+              <FilePreviewTabs
+                files={workflowState.files}
+                onDownloadAll={handleDownloadZip}
+              />
             )}
 
             {/* Workflow States - Action Cards */}
@@ -688,8 +739,12 @@ export default function ProjectPage() {
               <div className="bg-blue-500/10 border border-blue-400/30 rounded-lg p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-base font-semibold text-blue-300 mb-1">Next: Create Pull Request</h3>
-                    <p className="text-sm text-gray-400">Push infrastructure files to your repository</p>
+                    <h3 className="text-base font-semibold text-blue-300 mb-1">
+                      Next: Create Pull Request
+                    </h3>
+                    <p className="text-sm text-gray-400">
+                      Push infrastructure files to your repository
+                    </p>
                   </div>
                   <button
                     onClick={handleCreatePR}
@@ -706,8 +761,12 @@ export default function ProjectPage() {
               <div className="bg-green-500/10 border border-green-400/30 rounded-lg p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-base font-semibold text-green-300 mb-1">PR #{prInfo.pr_number} Created</h3>
-                    <p className="text-sm text-gray-400">Waiting for merge to proceed with deployment</p>
+                    <h3 className="text-base font-semibold text-green-300 mb-1">
+                      PR #{prInfo.pr_number} Created
+                    </h3>
+                    <p className="text-sm text-gray-400">
+                      Waiting for merge to proceed with deployment
+                    </p>
                   </div>
                   <a
                     href={prInfo.pr_url}
@@ -726,8 +785,13 @@ export default function ProjectPage() {
               <div className="bg-green-500/10 border border-green-400/30 rounded-lg p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-base font-semibold text-green-300 mb-1">Ready for Deployment</h3>
-                    <p className="text-sm text-gray-400">Infrastructure files are merged. Start the deployment process.</p>
+                    <h3 className="text-base font-semibold text-green-300 mb-1">
+                      Ready for Deployment
+                    </h3>
+                    <p className="text-sm text-gray-400">
+                      Infrastructure files are merged. Start the deployment
+                      process.
+                    </p>
                   </div>
                   <button
                     onClick={handleDeploy}
@@ -745,7 +809,9 @@ export default function ProjectPage() {
           <div className="space-y-6">
             {/* Project Details */}
             <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-6">
-              <h3 className="text-lg font-medium text-white mb-4">Project Details</h3>
+              <h3 className="text-lg font-medium text-white mb-4">
+                Project Details
+              </h3>
               <div className="space-y-4">
                 <div>
                   <p className="text-sm text-gray-500 mb-1">Status</p>
@@ -755,12 +821,16 @@ export default function ProjectPage() {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 mb-1">Language</p>
-                  <p className="text-sm text-gray-200">{project.language || "Not detected"}</p>
+                  <p className="text-sm text-gray-200">
+                    {project.language || "Not detected"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 mb-1">Template</p>
                   <p className="text-sm text-gray-200">
-                    {INFRASTRUCTURE_TEMPLATES.find((t) => t.id === selectedTemplate)?.name || "ECS Fargate"}
+                    {INFRASTRUCTURE_TEMPLATES.find(
+                      (t) => t.id === selectedTemplate
+                    )?.name || "ECS Fargate"}
                   </p>
                 </div>
               </div>
@@ -769,20 +839,33 @@ export default function ProjectPage() {
             {/* Selected Template Info */}
             {selectedTemplate && (
               <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-6">
-                <h3 className="text-lg font-medium text-white mb-4">Template Info</h3>
+                <h3 className="text-lg font-medium text-white mb-4">
+                  Template Info
+                </h3>
                 {(() => {
-                  const template = INFRASTRUCTURE_TEMPLATES.find((t) => t.id === selectedTemplate);
+                  const template = INFRASTRUCTURE_TEMPLATES.find(
+                    (t) => t.id === selectedTemplate
+                  );
                   return template ? (
                     <div className="space-y-4">
-                      <h4 className="font-medium text-gray-200">{template.name}</h4>
-                      <p className="text-gray-400 text-sm">{template.description}</p>
+                      <h4 className="font-medium text-gray-200">
+                        {template.name}
+                      </h4>
+                      <p className="text-gray-400 text-sm">
+                        {template.description}
+                      </p>
                       <div>
                         <p className="text-sm text-gray-500 mb-3">Features:</p>
                         <div className="space-y-2">
                           {template.features.map((feature) => (
-                            <div key={feature} className="flex items-center gap-2">
+                            <div
+                              key={feature}
+                              className="flex items-center gap-2"
+                            >
                               <CheckCircleIcon className="w-4 h-4 text-green-400" />
-                              <span className="text-sm text-gray-300">{feature}</span>
+                              <span className="text-sm text-gray-300">
+                                {feature}
+                              </span>
                             </div>
                           ))}
                         </div>

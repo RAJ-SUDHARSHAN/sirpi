@@ -311,7 +311,6 @@ export AWS_DEFAULT_REGION="{settings.aws_region}"
             image_tag = f"{ecr_repository_url}:latest"
             add_log(f"🔨 Building Docker image...")
             add_log(f"   Image tag: {image_tag}")
-            add_log(f"   ⏱️  Note: Complex builds like Ghost may take 30+ minutes")
             
             build_result = await self._run_blocking_command(
                 sandbox,

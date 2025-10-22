@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { useUser } from "@clerk/nextjs";
 import { useParams, useRouter } from "next/navigation";
 import { ansiToHtml } from "@/lib/utils/ansi-to-html";
@@ -114,15 +120,21 @@ export default function DeployPage() {
   const maxReconnectAttempts = 3;
   const operationStartTime = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (logsEndRef.current && sections.some(s => s.status === "running")) {
-      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+  const shouldScroll = useMemo(() => {
+    return sections.some((s) => s.status === "running");
   }, [sections]);
 
   useEffect(() => {
+    if (logsEndRef.current && shouldScroll) {
+      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [shouldScroll]);
+
+  useEffect(() => {
     if (user) {
-      const expectedNamespace = getUserProjectNamespace(user as { username?: string; firstName?: string; id: string });
+      const expectedNamespace = getUserProjectNamespace(
+        user as { username?: string; firstName?: string; id: string }
+      );
       if (userProjects !== expectedNamespace) {
         router.replace(`/${expectedNamespace}/${projectSlug}/deploy`);
         return;
@@ -130,155 +142,186 @@ export default function DeployPage() {
     }
   }, [user, userProjects, projectSlug, router]);
 
-  useEffect(() => {
-    async function loadProject() {
-      try {
-        setIsLoading(true);
-        const overview = await projectsApi.getUserOverview();
-        if (overview) {
-          const userOverview = overview as { projects: { items: Project[] } };
-          const foundProject = userOverview.projects.items.find(
-            (p) =>
-              p.slug === projectSlug ||
-              p.name.toLowerCase().replace(/[^a-z0-9]/g, "-") === projectSlug
+  const loadProject = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const overview = await projectsApi.getUserOverview();
+      if (overview) {
+        const userOverview = overview as { projects: { items: Project[] } };
+        const foundProject = userOverview.projects.items.find(
+          (p) =>
+            p.slug === projectSlug ||
+            p.name.toLowerCase().replace(/[^a-z0-9]/g, "-") === projectSlug
+        );
+
+        if (foundProject) {
+          console.log("[LoadProject] Found project:", foundProject.name);
+          console.log(
+            "[LoadProject] Deployment status:",
+            foundProject.deployment_status
           );
+          console.log(
+            "[LoadProject] Application URL:",
+            foundProject.application_url
+          );
+          setProject(foundProject);
 
-          if (foundProject) {
-            console.log('[LoadProject] Found project:', foundProject.name);
-            console.log('[LoadProject] Deployment status:', foundProject.deployment_status);
-            console.log('[LoadProject] Application URL:', foundProject.application_url);
-            setProject(foundProject);
-            
-            // Set deployment state based on project status
-            if (foundProject.deployment_status === 'deployed') {
-              console.log('[LoadProject] Setting deployed state to true');
-              setDeploymentState(prev => ({
-                ...prev,
-                currentStep: 'deployed',
-                imagePushed: true,
-                planGenerated: true,
-                deployed: true,
-              }));
-            }
+          // Set deployment state based on project status
+          if (foundProject.deployment_status === "deployed") {
+            console.log("[LoadProject] Setting deployed state to true");
+            setDeploymentState((prev) => ({
+              ...prev,
+              currentStep: "deployed",
+              imagePushed: true,
+              planGenerated: true,
+              deployed: true,
+            }));
+          }
 
-            // Load previous deployment logs from database
-            try {
-              const token = await (window as unknown as ClerkWindow).Clerk?.session?.getToken();
-              const logsResponse = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${foundProject.id}/logs`,
-                {
-                  headers: {
-                    Authorization: `Bearer ${token}`,
+          // Load previous deployment logs from database
+          try {
+            const token = await (
+              window as unknown as ClerkWindow
+            ).Clerk?.session?.getToken();
+            const logsResponse = await fetch(
+              `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${foundProject.id}/logs`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }
+            );
+
+            if (logsResponse.ok) {
+              const logsData = await logsResponse.json();
+              if (logsData.success && logsData.data.logs.length > 0) {
+                const sectionMap: Record<string, string> = {
+                  build_image: "build",
+                  plan: "plan",
+                  apply: "deploy",
+                  destroy: "destroy",
+                };
+
+                const initialSections: CollapsibleSection[] = [
+                  {
+                    id: "build",
+                    title: "Build Logs",
+                    logs: [],
+                    status: "idle",
+                    isExpanded: false,
                   },
-                }
-              );
+                  {
+                    id: "plan",
+                    title: "Deployment Summary",
+                    logs: [],
+                    status: "idle",
+                    isExpanded: false,
+                  },
+                  {
+                    id: "deploy",
+                    title: "Deployment Logs",
+                    logs: [],
+                    status: "idle",
+                    isExpanded: false,
+                  },
+                ];
 
-              if (logsResponse.ok) {
-                const logsData = await logsResponse.json();
-                if (logsData.success && logsData.data.logs.length > 0) {
-                  const sectionMap: Record<string, string> = {
-                    build_image: "build",
-                    plan: "plan",
-                    apply: "deploy",
-                    destroy: "destroy",
-                  };
+                const restoredSections = [...initialSections];
 
-                  const restoredSections = [...sections];
-
-                  logsData.data.logs.forEach((logRecord: LogRecord) => {
-                    const sectionId = sectionMap[logRecord.operation_type];
-                    if (sectionId) {
-                      const sectionIndex = restoredSections.findIndex(
-                        (s) => s.id === sectionId
-                      );
-                      if (sectionIndex >= 0) {
-                        restoredSections[sectionIndex] = {
-                          ...restoredSections[sectionIndex],
-                          logs: logRecord.logs || [],
-                          status:
-                            logRecord.status === "success"
-                              ? "success"
-                              : logRecord.status === "error"
-                              ? "error"
-                              : "idle",
-                          duration: logRecord.duration_seconds
-                            ? `${logRecord.duration_seconds}s`
-                            : undefined,
-                          isExpanded: false,
-                        };
-                      }
+                logsData.data.logs.forEach((logRecord: LogRecord) => {
+                  const sectionId = sectionMap[logRecord.operation_type];
+                  if (sectionId) {
+                    const sectionIndex = restoredSections.findIndex(
+                      (s) => s.id === sectionId
+                    );
+                    if (sectionIndex >= 0) {
+                      restoredSections[sectionIndex] = {
+                        ...restoredSections[sectionIndex],
+                        logs: logRecord.logs || [],
+                        status:
+                          logRecord.status === "success"
+                            ? "success"
+                            : logRecord.status === "error"
+                            ? "error"
+                            : "idle",
+                        duration: logRecord.duration_seconds
+                          ? `${logRecord.duration_seconds}s`
+                          : undefined,
+                        isExpanded: false,
+                      };
                     }
-                  });
-
-                  setSections(restoredSections);
-
-                  const hasCompletedBuild = logsData.data.logs.some(
-                    (l: LogRecord) =>
-                      l.operation_type === "build_image" &&
-                      l.status === "success"
-                  );
-                  const hasCompletedPlan = logsData.data.logs.some(
-                    (l: LogRecord) =>
-                      l.operation_type === "plan" && l.status === "success"
-                  );
-                  const hasCompletedDeploy = logsData.data.logs.some(
-                    (l: LogRecord) =>
-                      l.operation_type === "apply" && l.status === "success"
-                  );
-
-                  if (hasCompletedDeploy) {
-                    setDeploymentState((prev) => ({
-                      ...prev,
-                      currentStep: "deployed",
-                      imagePushed: true,
-                      planGenerated: true,
-                      deployed: true,
-                    }));
-                  } else if (hasCompletedPlan) {
-                    setDeploymentState((prev) => ({
-                      ...prev,
-                      currentStep: "planned",
-                      imagePushed: true,
-                      planGenerated: true,
-                    }));
-                  } else if (hasCompletedBuild) {
-                    setDeploymentState((prev) => ({
-                      ...prev,
-                      currentStep: "built",
-                      imagePushed: true,
-                    }));
                   }
+                });
+
+                setSections(restoredSections);
+
+                const hasCompletedBuild = logsData.data.logs.some(
+                  (l: LogRecord) =>
+                    l.operation_type === "build_image" && l.status === "success"
+                );
+                const hasCompletedPlan = logsData.data.logs.some(
+                  (l: LogRecord) =>
+                    l.operation_type === "plan" && l.status === "success"
+                );
+                const hasCompletedDeploy = logsData.data.logs.some(
+                  (l: LogRecord) =>
+                    l.operation_type === "apply" && l.status === "success"
+                );
+
+                if (hasCompletedDeploy) {
+                  setDeploymentState((prev) => ({
+                    ...prev,
+                    currentStep: "deployed",
+                    imagePushed: true,
+                    planGenerated: true,
+                    deployed: true,
+                  }));
+                } else if (hasCompletedPlan) {
+                  setDeploymentState((prev) => ({
+                    ...prev,
+                    currentStep: "planned",
+                    imagePushed: true,
+                    planGenerated: true,
+                  }));
+                } else if (hasCompletedBuild) {
+                  setDeploymentState((prev) => ({
+                    ...prev,
+                    currentStep: "built",
+                    imagePushed: true,
+                  }));
                 }
               }
-            } catch (logError) {
-              console.error("Failed to load deployment logs:", logError);
             }
-
-            const canDeploy =
-              foundProject.deployment_status === "aws_verified" ||
-              foundProject.deployment_status === "deployed" ||
-              foundProject.deployment_status === "completed" ||
-              foundProject.status === "pr_merged";
-
-            if (!canDeploy) {
-              router.push(`/${userProjects}/${projectSlug}`);
-              return;
-            }
-          } else {
-            router.push(`/${userProjects}`);
+          } catch (logError) {
+            console.error("Failed to load deployment logs:", logError);
           }
-        }
-      } catch {
-        router.push(`/${userProjects}`);
-      } finally {
-        setIsLoading(false);
-      }
-    }
 
-    if (user && projectSlug && userProjects) {
+          const canDeploy =
+            foundProject.deployment_status === "aws_verified" ||
+            foundProject.deployment_status === "deployed" ||
+            foundProject.deployment_status === "completed" ||
+            foundProject.status === "pr_merged";
+
+          if (!canDeploy) {
+            router.push(`/${userProjects}/${projectSlug}`);
+            return;
+          }
+        } else {
+          router.push(`/${userProjects}`);
+        }
+      }
+    } catch {
+      router.push(`/${userProjects}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectSlug, userProjects, router]);
+
+  useEffect(() => {
+    if (projectSlug && userProjects) {
       loadProject();
     }
-  }, [user, projectSlug, userProjects, router, sections]);
+  }, [loadProject, projectSlug, userProjects]);
 
   useEffect(() => {
     return () => {
@@ -358,7 +401,9 @@ export default function DeployPage() {
     operationStartTime.current = Date.now();
 
     try {
-      const token = await (window as unknown as ClerkWindow).Clerk?.session?.getToken();
+      const token = await (
+        window as unknown as ClerkWindow
+      ).Clerk?.session?.getToken();
 
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${project.id}/${operation}`,
@@ -448,19 +493,28 @@ export default function DeployPage() {
               updates.deployed = true;
 
               // Refetch project to get terraform outputs
-              console.log('[Deploy] Deployment complete, fetching updated project data...');
+              console.log(
+                "[Deploy] Deployment complete, fetching updated project data..."
+              );
               setTimeout(async () => {
                 try {
-                  console.log('[Deploy] Fetching project by ID:', project.id);
-                  const updatedProject = await projectsApi.getProjectById(
-                    project.id
-                  );
-                  if (updatedProject) {
-                    console.log('[Deploy] Updated project terraform_outputs:', updatedProject.terraform_outputs);
-                    setProject(updatedProject);
-                    console.log('[Deploy] Project state updated successfully');
-                  } else {
-                    console.warn('[Deploy] No project returned from API');
+                  if (project?.id) {
+                    console.log("[Deploy] Fetching project by ID:", project.id);
+                    const updatedProject = await projectsApi.getProjectById(
+                      project.id
+                    );
+                    if (updatedProject) {
+                      console.log(
+                        "[Deploy] Updated project terraform_outputs:",
+                        updatedProject.terraform_outputs
+                      );
+                      setProject(updatedProject);
+                      console.log(
+                        "[Deploy] Project state updated successfully"
+                      );
+                    } else {
+                      console.warn("[Deploy] No project returned from API");
+                    }
                   }
                 } catch (error) {
                   console.error("Failed to refetch project:", error);
@@ -530,7 +584,9 @@ export default function DeployPage() {
     ]);
 
     try {
-      const token = await (window as unknown as ClerkWindow).Clerk?.session?.getToken();
+      const token = await (
+        window as unknown as ClerkWindow
+      ).Clerk?.session?.getToken();
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${project.id}/destroy`,
         {
@@ -585,7 +641,7 @@ export default function DeployPage() {
           toast.success("AWS connected! You can now deploy.");
         }
       }
-    } catch (error) {
+    } catch {
       toast.error("Failed to connect AWS");
     }
   };
@@ -1122,10 +1178,7 @@ export default function DeployPage() {
         )}
       </div>
 
-      <SirpiAssistant
-        projectId={project.id}
-        allLogs={sections.flatMap((s) => s.logs)}
-      />
+      <SirpiAssistant projectId={project?.id} />
 
       <AWSSetupFlow
         isVisible={showAWSSetup}

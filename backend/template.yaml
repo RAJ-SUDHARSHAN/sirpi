@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Sirpi Backend API
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - production
+
+Resources:
+  SirpiBackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: sirpi-backend
+      CodeUri: .
+      Handler: lambda_handler.handler
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          # Application
+          ENVIRONMENT: !Ref Environment
+          LOG_LEVEL: INFO
+          API_V1_PREFIX: /api/v1
+          CORS_ORIGINS: https://sirpi.rajs.dev,http://localhost:3000
+          
+          # Clerk Authentication
+          CLERK_SECRET_KEY: !Sub '{{resolve:ssm:/sirpi/clerk-secret-key}}'
+          CLERK_WEBHOOK_SECRET: !Sub '{{resolve:ssm:/sirpi/clerk-webhook-secret}}'
+          
+          # Supabase Database
+          SUPABASE_USER: !Sub '{{resolve:ssm:/sirpi/supabase-user}}'
+          SUPABASE_PASSWORD: !Sub '{{resolve:ssm:/sirpi/supabase-password}}'
+          SUPABASE_HOST: !Sub '{{resolve:ssm:/sirpi/supabase-host}}'
+          SUPABASE_PORT: '6543'
+          SUPABASE_DBNAME: postgres
+          
+          # AWS Configuration (AWS_REGION is automatically set by Lambda)
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          
+          # Bedrock Models
+          BEDROCK_MODEL_ID: !Sub '{{resolve:ssm:/sirpi/bedrock-model-id}}'
+          BEDROCK_AGENT_FOUNDATION_MODEL: !Sub '{{resolve:ssm:/sirpi/bedrock-agent-foundation-model}}'
+          SIRPI_ASSISTANT_MODEL_ID: us.amazon.nova-pro-v1:0
+          SIRPI_ASSISTANT_REGION: us-east-1
+          
+          # AgentCore Agent IDs
+          AGENTCORE_ORCHESTRATOR_AGENT_ID: !Sub '{{resolve:ssm:/sirpi/agentcore-orchestrator-agent-id}}'
+          AGENTCORE_CONTEXT_ANALYZER_AGENT_ID: !Sub '{{resolve:ssm:/sirpi/agentcore-context-analyzer-agent-id}}'
+          AGENTCORE_DOCKERFILE_GENERATOR_AGENT_ID: !Sub '{{resolve:ssm:/sirpi/agentcore-dockerfile-generator-agent-id}}'
+          AGENTCORE_TERRAFORM_GENERATOR_AGENT_ID: !Sub '{{resolve:ssm:/sirpi/agentcore-terraform-generator-agent-id}}'
+          
+          # Agent Aliases
+          AGENTCORE_CONTEXT_ANALYZER_ALIAS_ID: TSTALIASID
+          AGENTCORE_DOCKERFILE_GENERATOR_ALIAS_ID: TSTALIASID
+          AGENTCORE_TERRAFORM_GENERATOR_ALIAS_ID: TSTALIASID
+          
+          # DynamoDB Tables
+          DYNAMODB_SESSIONS_TABLE: sirpi-sessions
+          DYNAMODB_LOGS_TABLE: sirpi-logs
+          DYNAMODB_TERRAFORM_LOCK_TABLE: sirpi-terraform-locks
+          
+          # S3 Buckets
+          S3_BUCKET_NAME: sirpi-generated-files
+          S3_REGION: us-west-2
+          S3_TERRAFORM_STATE_BUCKET: sirpi-terraform-states
+          
+          # GitHub App
+          GITHUB_APP_ID: !Sub '{{resolve:ssm:/sirpi/github-app-id}}'
+          GITHUB_APP_CLIENT_ID: !Sub '{{resolve:ssm:/sirpi/github-client-id}}'
+          GITHUB_APP_CLIENT_SECRET: !Sub '{{resolve:ssm:/sirpi/github-client-secret}}'
+          GITHUB_APP_PRIVATE_KEY_PATH: ./github-app-private-key.pem
+          GITHUB_APP_WEBHOOK_SECRET: !Sub '{{resolve:ssm:/sirpi/github-webhook-secret}}'
+          GITHUB_APP_NAME: raj-sirpi
+          GITHUB_BASE_URL: https://github.com
+          GITHUB_API_BASE_URL: https://api.github.com
+          
+          # CloudFormation
+          CLOUDFORMATION_TEMPLATE_URL: https://sirpi-generated-files.s3.us-west-2.amazonaws.com/cloudformation/sirpi-setup.yaml
+          
+          # E2B
+          E2B_API_KEY: !Sub '{{resolve:ssm:/sirpi/e2b-api-key}}'
+          
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeAgent
+                - s3:*
+                - sts:AssumeRole
+                - ecr:*
+                - ecs:*
+                - cloudformation:*
+                - dynamodb:*
+                - logs:*
+                - ssm:GetParameter
+                - ssm:GetParameters
+              Resource: '*'
+      Events:
+        HttpApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+            ApiId: !Ref SirpiHttpApi
+
+  SirpiHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      CorsConfiguration:
+        AllowOrigins:
+          - https://sirpi.rajs.dev
+          - http://localhost:3000
+        AllowHeaders:
+          - '*'
+        AllowMethods:
+          - '*'
+        AllowCredentials: true
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${SirpiHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
+  
+  FunctionArn:
+    Description: "Lambda Function ARN"
+    Value: !GetAtt SirpiBackendFunction.Arn

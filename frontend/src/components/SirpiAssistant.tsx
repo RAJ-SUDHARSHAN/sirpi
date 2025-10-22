@@ -3,8 +3,8 @@
 import React, { useState } from "react";
 import { XCircleIcon } from "./ui/icons";
 import Image from "next/image";
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Message {
   role: "user" | "assistant";
@@ -14,13 +14,9 @@ interface Message {
 
 interface SirpiAssistantProps {
   projectId: string;
-  allLogs?: string[];
 }
 
-export default function SirpiAssistant({
-  projectId,
-  allLogs = [],
-}: SirpiAssistantProps) {
+export default function SirpiAssistant({ projectId }: SirpiAssistantProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -34,7 +30,9 @@ export default function SirpiAssistant({
     setIsAsking(true);
 
     try {
-      const token = await (window as any).Clerk?.session?.getToken();
+      const token = await (
+        window as { Clerk?: { session?: { getToken: () => Promise<string> } } }
+      ).Clerk?.session?.getToken();
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/v1/assistant/chat`,
         {
@@ -71,7 +69,7 @@ export default function SirpiAssistant({
           },
         ]);
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
@@ -156,7 +154,7 @@ export default function SirpiAssistant({
             {messages.length === 0 && (
               <div className="py-8 px-4">
                 <p className="text-base font-medium text-white mb-4">
-                  👋 Hi! I'm your Sirpi AI Assistant
+                  👋 Hi! I&apos;m your Sirpi AI Assistant
                 </p>
                 <div className="text-sm text-gray-400 space-y-3">
                   <p>I can help you with:</p>
@@ -192,7 +190,7 @@ export default function SirpiAssistant({
                       </span>
                     </div>
                   )}
-                  
+
                   {msg.role === "assistant" ? (
                     <div className="prose prose-invert prose-sm max-w-none">
                       <ReactMarkdown
@@ -200,28 +198,42 @@ export default function SirpiAssistant({
                         components={{
                           // Style headers
                           h1: ({ children }) => (
-                            <h1 className="text-lg font-bold text-white mt-4 mb-2">{children}</h1>
+                            <h1 className="text-lg font-bold text-white mt-4 mb-2">
+                              {children}
+                            </h1>
                           ),
                           h2: ({ children }) => (
-                            <h2 className="text-base font-bold text-white mt-3 mb-1.5">{children}</h2>
+                            <h2 className="text-base font-bold text-white mt-3 mb-1.5">
+                              {children}
+                            </h2>
                           ),
                           h3: ({ children }) => (
-                            <h3 className="text-sm font-semibold text-purple-300 mt-2 mb-1">{children}</h3>
+                            <h3 className="text-sm font-semibold text-purple-300 mt-2 mb-1">
+                              {children}
+                            </h3>
                           ),
                           // Style paragraphs
                           p: ({ children }) => (
-                            <p className="text-sm text-gray-300 my-2 leading-relaxed">{children}</p>
+                            <p className="text-sm text-gray-300 my-2 leading-relaxed">
+                              {children}
+                            </p>
                           ),
                           // Style lists
                           ul: ({ children }) => (
-                            <ul className="text-sm text-gray-300 my-2 space-y-1 list-none pl-0">{children}</ul>
+                            <ul className="text-sm text-gray-300 my-2 space-y-1 list-none pl-0">
+                              {children}
+                            </ul>
                           ),
                           ol: ({ children }) => (
-                            <ol className="text-sm text-gray-300 my-2 space-y-1 pl-5">{children}</ol>
+                            <ol className="text-sm text-gray-300 my-2 space-y-1 pl-5">
+                              {children}
+                            </ol>
                           ),
                           li: ({ children }) => (
                             <li className="flex gap-2 items-start">
-                              <span className="text-purple-400 flex-shrink-0 mt-0.5">•</span>
+                              <span className="text-purple-400 flex-shrink-0 mt-0.5">
+                                •
+                              </span>
                               <span>{children}</span>
                             </li>
                           ),
@@ -229,20 +241,26 @@ export default function SirpiAssistant({
                           code: ({ className, children, ...props }) => {
                             const isInline = !className;
                             return isInline ? (
-                              <code className="bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded text-xs font-mono" {...props}>
+                              <code
+                                className="bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded text-xs font-mono"
+                                {...props}
+                              >
                                 {children}
                               </code>
                             ) : (
-                              <code className="block bg-black/50 text-purple-300 p-2 rounded text-xs font-mono overflow-x-auto" {...props}>
+                              <code
+                                className="block bg-black/50 text-purple-300 p-2 rounded text-xs font-mono overflow-x-auto"
+                                {...props}
+                              >
                                 {children}
                               </code>
                             );
                           },
                           // Style links
                           a: ({ children, href }) => (
-                            <a 
-                              href={href} 
-                              target="_blank" 
+                            <a
+                              href={href}
+                              target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-400 hover:text-blue-300 underline"
                             >
@@ -251,7 +269,9 @@ export default function SirpiAssistant({
                           ),
                           // Style strong/bold
                           strong: ({ children }) => (
-                            <strong className="font-semibold text-white">{children}</strong>
+                            <strong className="font-semibold text-white">
+                              {children}
+                            </strong>
                           ),
                         }}
                       >
@@ -270,7 +290,9 @@ export default function SirpiAssistant({
                 <div className="bg-[#111111] border border-[#333333] rounded-lg p-3">
                   <div className="flex items-center gap-2">
                     <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm text-gray-400">Analyzing with AgentCore...</span>
+                    <span className="text-sm text-gray-400">
+                      Analyzing with AgentCore...
+                    </span>
                   </div>
                 </div>
               </div>

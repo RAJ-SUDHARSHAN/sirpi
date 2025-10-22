@@ -121,9 +121,18 @@ Resources:
           - http://localhost:3000
         AllowHeaders:
           - '*'
+          - authorization
+          - content-type
+          - x-requested-with
         AllowMethods:
-          - '*'
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
         AllowCredentials: true
+        MaxAge: 300
 
 Outputs:
   ApiUrl:

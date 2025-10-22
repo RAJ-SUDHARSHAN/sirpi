@@ -34,8 +34,8 @@ app = FastAPI(
     title="Sirpi AWS DevPost API",
     description="AI-Native DevOps Automation Platform",
     version="1.0.0",
-    docs_url="/docs" if settings.environment == "development" else None,
-    redoc_url="/redoc" if settings.environment == "development" else None,
+    docs_url="/docs",
+    redoc_url="/redoc",
     lifespan=lifespan,
 )
 

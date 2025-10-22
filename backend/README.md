@@ -99,7 +99,7 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
-API documentation available at `https://sirpi.rajs.dev/api/docs`
+API documentation available at `https://api.sirpi.rajs.dev/docs`
 
 ---
 

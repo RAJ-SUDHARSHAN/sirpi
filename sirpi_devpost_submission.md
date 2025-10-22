@@ -81,7 +81,7 @@ This allowed me to:
 
 **AgentCore Memory state management** required careful orchestration — ensuring agents wrote complete context and subsequent agents could reliably read and parse it
 
-**Cross-account IAM role assumption** from Lambda had edge cases — handling temporary credential expiration, permission scoping, and error recovery when roles were misconfigured
+**Cross-account IAM role assumption** required careful handling — managing temporary credential expiration during multi-step deployments, proper permission scoping for ECR and CloudFormation access, and clear error messages when users provided incorrect role ARNs
 
 **Terraform state locking** needed bulletproof implementation — preventing state corruption during concurrent operations and ensuring clean deletion
 
@@ -115,7 +115,7 @@ This allowed me to:
 
 **Real-time streaming requires careful architecture** — Server-Sent Events, chunking strategies, and reconnection logic were essential for 5+ minute operations
 
-**Cross-account IAM is powerful but unforgiving** — I debugged edge case in role assumption, learned trust policy nuances, and implemented robust error recovery
+**Cross-account IAM is powerful but unforgiving** — I learned trust policy syntax the hard way, debugged AssumeRole permission errors, and built user-friendly error messages for common misconfiguration issues
 
 **Template-based generation beats pure AI** — for Terraform, templates with intelligent variable injection proved more reliable than fully AI-generated code
 

@@ -5,8 +5,6 @@ import { useUser } from "@clerk/nextjs";
 import { useParams, useRouter } from "next/navigation";
 import { ansiToHtml } from "@/lib/utils/ansi-to-html";
 import {
-  ChevronLeftIcon,
-  CheckCircleIcon,
   XCircleIcon,
   ExternalLinkIcon,
   ChevronDownIcon,
@@ -48,6 +46,21 @@ interface CollapsibleSection {
   status: "idle" | "running" | "success" | "error";
   duration?: string;
   isExpanded: boolean;
+}
+
+interface LogRecord {
+  operation_type: string;
+  logs?: string[];
+  status: string;
+  duration_seconds?: number;
+}
+
+interface ClerkWindow {
+  Clerk?: {
+    session?: {
+      getToken: () => Promise<string>;
+    };
+  };
 }
 
 export default function DeployPage() {
@@ -102,14 +115,14 @@ export default function DeployPage() {
   const operationStartTime = useRef<number | null>(null);
 
   useEffect(() => {
-    if (logsEndRef.current) {
+    if (logsEndRef.current && sections.some(s => s.status === "running")) {
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [sections]);
 
   useEffect(() => {
     if (user) {
-      const expectedNamespace = getUserProjectNamespace(user as any);
+      const expectedNamespace = getUserProjectNamespace(user as { username?: string; firstName?: string; id: string });
       if (userProjects !== expectedNamespace) {
         router.replace(`/${expectedNamespace}/${projectSlug}/deploy`);
         return;
@@ -150,7 +163,7 @@ export default function DeployPage() {
 
             // Load previous deployment logs from database
             try {
-              const token = await (window as any).Clerk?.session?.getToken();
+              const token = await (window as unknown as ClerkWindow).Clerk?.session?.getToken();
               const logsResponse = await fetch(
                 `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${foundProject.id}/logs`,
                 {
@@ -172,7 +185,7 @@ export default function DeployPage() {
 
                   const restoredSections = [...sections];
 
-                  logsData.data.logs.forEach((logRecord: any) => {
+                  logsData.data.logs.forEach((logRecord: LogRecord) => {
                     const sectionId = sectionMap[logRecord.operation_type];
                     if (sectionId) {
                       const sectionIndex = restoredSections.findIndex(
@@ -200,16 +213,16 @@ export default function DeployPage() {
                   setSections(restoredSections);
 
                   const hasCompletedBuild = logsData.data.logs.some(
-                    (l: any) =>
+                    (l: LogRecord) =>
                       l.operation_type === "build_image" &&
                       l.status === "success"
                   );
                   const hasCompletedPlan = logsData.data.logs.some(
-                    (l: any) =>
+                    (l: LogRecord) =>
                       l.operation_type === "plan" && l.status === "success"
                   );
                   const hasCompletedDeploy = logsData.data.logs.some(
-                    (l: any) =>
+                    (l: LogRecord) =>
                       l.operation_type === "apply" && l.status === "success"
                   );
 
@@ -265,7 +278,7 @@ export default function DeployPage() {
     if (user && projectSlug && userProjects) {
       loadProject();
     }
-  }, [user, projectSlug, userProjects, router]);
+  }, [user, projectSlug, userProjects, router, sections]);
 
   useEffect(() => {
     return () => {
@@ -291,7 +304,7 @@ export default function DeployPage() {
           ? {
               ...s,
               logs: [...s.logs, `[${timestamp}] ${message}`],
-              status: "running",
+              status: "running" as const,
               isExpanded: true,
             }
           : s
@@ -330,7 +343,7 @@ export default function DeployPage() {
     setSections((prev) =>
       prev.map((s) =>
         s.id === sectionId
-          ? { ...s, logs: [], status: "running", isExpanded: true }
+          ? { ...s, logs: [], status: "running" as const, isExpanded: true }
           : s
       )
     );
@@ -345,7 +358,7 @@ export default function DeployPage() {
     operationStartTime.current = Date.now();
 
     try {
-      const token = await (window as any).Clerk?.session?.getToken();
+      const token = await (window as unknown as ClerkWindow).Clerk?.session?.getToken();
 
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${project.id}/${operation}`,
@@ -452,7 +465,7 @@ export default function DeployPage() {
                 } catch (error) {
                   console.error("Failed to refetch project:", error);
                 }
-              }, 3000); // Wait 3 seconds for backend to save outputs
+              }, 3000);
             }
 
             return { ...prev, ...updates };
@@ -517,7 +530,7 @@ export default function DeployPage() {
     ]);
 
     try {
-      const token = await (window as any).Clerk?.session?.getToken();
+      const token = await (window as unknown as ClerkWindow).Clerk?.session?.getToken();
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/projects/${project.id}/destroy`,
         {
@@ -743,14 +756,12 @@ export default function DeployPage() {
         ? "disabled"
         : "pending",
       action: () => startOperation("apply"),
-      // disabled: deploymentState.isStreaming || !deploymentState.planGenerated || deploymentState.deployed,
     },
   ];
 
   return (
     <div className="min-h-screen bg-black">
       <div className="max-w-7xl mx-auto px-6 py-8">
-
         <div className="mb-8">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -778,7 +789,6 @@ export default function DeployPage() {
             </button>
           </div>
 
-          {/* Deployment Info Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
             <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-4">
               <div className="text-xs text-gray-500 mb-1">Template</div>
@@ -819,7 +829,6 @@ export default function DeployPage() {
             </div>
           </div>
 
-          {/* Infrastructure Overview - Only show if deployed or planned */}
           {(deploymentState.deployed || deploymentState.planGenerated) && (
             <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-6 mb-8">
               <h3 className="text-sm font-semibold text-gray-200 mb-4">
@@ -937,7 +946,6 @@ export default function DeployPage() {
           )}
         </div>
 
-        {/* AWS Setup Required - Show prominently if not verified */}
         {!isAWSVerified && (
           <div className="bg-orange-500/10 border border-orange-400/30 rounded-lg p-6 mb-8">
             <div className="flex items-center justify-between">
@@ -964,7 +972,6 @@ export default function DeployPage() {
           </div>
         )}
 
-        {/* Deployment Steps - Only show if AWS verified */}
         {isAWSVerified && (
           <div className="grid grid-cols-3 gap-3 mb-8">
             {steps.map((step, index) => (
@@ -1034,7 +1041,6 @@ export default function DeployPage() {
           </div>
         )}
 
-        {/* Collapsible Log Sections */}
         <div className="space-y-px mb-6">
           {sections
             .filter((s) => s.logs.length > 0 || s.status !== "idle")
@@ -1089,7 +1095,6 @@ export default function DeployPage() {
             ))}
         </div>
 
-        {/* Error State */}
         {deploymentState.currentStep === "failed" && (
           <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-6">
             <div className="flex items-center gap-3 mb-3">
@@ -1117,13 +1122,11 @@ export default function DeployPage() {
         )}
       </div>
 
-      {/* Sirpi AI Assistant - Floating Chat */}
       <SirpiAssistant
         projectId={project.id}
         allLogs={sections.flatMap((s) => s.logs)}
       />
 
-      {/* AWS Setup Modal */}
       <AWSSetupFlow
         isVisible={showAWSSetup}
         onComplete={handleAWSSetupComplete}
@@ -1131,7 +1134,6 @@ export default function DeployPage() {
         projectId={project?.id}
       />
 
-      {/* Destroy Modal */}
       {showDestroyConfirm && (
         <div
           className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50"

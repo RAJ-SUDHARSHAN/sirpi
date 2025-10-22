@@ -93,6 +93,8 @@ Resources:
               Action:
                 - bedrock:InvokeModel
                 - bedrock:InvokeAgent
+                - bedrock-agent:InvokeAgent
+                - bedrock-agentcore:*
                 - s3:*
                 - sts:AssumeRole
                 - ecr:*

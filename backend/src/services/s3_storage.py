@@ -27,12 +27,10 @@ class S3StorageService:
     """
 
     def __init__(self):
-        # Explicitly use credentials from settings to avoid ~/.aws/credentials precedence
+        # Use Lambda execution role credentials automatically
         self.s3_client = boto3.client(
             "s3",
-            region_name=settings.s3_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
+            region_name=settings.s3_region
         )
         self.generated_files_bucket = settings.s3_bucket_name
         self.terraform_state_bucket = settings.s3_terraform_state_bucket

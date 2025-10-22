@@ -30,9 +30,7 @@ class BaseBedrockAgent(ABC):
         self.agent_name = agent_name
         self.bedrock_client = boto3.client(
             'bedrock-agent-runtime',
-            region_name=settings.aws_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key
+            region_name=settings.aws_region
         )
         logger.info(f"Initialized {agent_name} (ID: {agent_id}, Alias: {agent_alias_id})")
     

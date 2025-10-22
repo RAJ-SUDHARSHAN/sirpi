@@ -5,7 +5,6 @@ import React, {
   useEffect,
   useRef,
   useCallback,
-  useMemo,
 } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useParams, useRouter } from "next/navigation";
@@ -120,15 +119,13 @@ export default function DeployPage() {
   const maxReconnectAttempts = 3;
   const operationStartTime = useRef<number | null>(null);
 
-  const shouldScroll = useMemo(() => {
-    return sections.some((s) => s.status === "running");
-  }, [sections]);
-
+  // Auto-scroll when new logs are added to running sections
   useEffect(() => {
-    if (logsEndRef.current && shouldScroll) {
-      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    const hasRunningSection = sections.some(s => s.status === "running");
+    if (logsEndRef.current && hasRunningSection) {
+      logsEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [shouldScroll]);
+  }, [sections.flatMap(s => s.logs).length]); // Trigger on log count change
 
   useEffect(() => {
     if (user) {

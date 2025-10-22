@@ -37,6 +37,7 @@ export function useDeploymentPolling({
 
     try {
       // Get Clerk token
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const token = await (window as any).Clerk?.session?.getToken();
       if (!token) return;
 

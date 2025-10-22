@@ -129,6 +129,7 @@ export default function DeployPage() {
         logContainer.scrollTop = logContainer.scrollHeight;
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections.flatMap(s => s.logs).length, activeSectionId]); // Trigger on log count change
 
   useEffect(() => {
@@ -325,6 +326,7 @@ export default function DeployPage() {
   }, [loadProject, projectSlug, userProjects]);
 
   // Polling hook for deployment logs
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { isPolling, stopPolling } = useDeploymentPolling({
     operationId: deploymentState.operationId,
     enabled: deploymentState.isStreaming && !!activeSectionId,

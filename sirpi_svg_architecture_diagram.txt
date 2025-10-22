@@ -1,0 +1,105 @@
+// eraser.io
+direction down
+title Sirpi Architecture Diagram
+
+Developer [icon: user, label: "Developer/User"]
+
+Sirpi Platform AWS [icon: aws] {
+  User Interface [icon: monitor] {
+    Nextjs Frontend [icon: lambda, label: "Next.js 14"]
+    Clerk Auth [icon: clerk, label: "Clerk Auth"]
+  }
+
+  API Layer [icon: aws-api-gateway] {
+    Sirpi API Gateway [icon: aws-api-gateway, label: "HTTP API Gateway"]
+  }
+
+  Backend Services [icon: server] {
+    FastAPI Backend [icon: lambda, label: "FastAPI Backend"]
+    Supabase [icon: supabase, label: "Supabase"]
+  }
+
+  Bedrock AgentCore [icon: aws-bedrock] {
+    Orchestrator Agent [icon: aws-bedrock, label: "Orchestrator Agent"]
+
+    Specialized Agents [icon: aws-bedrock] {
+      Context Analyzer [icon: aws-bedrock, label: "Context Analyzer"]
+      Dockerfile Generator [icon: aws-bedrock, label: "Dockerfile Generator"]
+      Terraform Generator [icon: aws-bedrock, label: "Terraform Generator"]
+    }
+
+    AgentCore Memory [icon: aws-s3, label: "AgentCore Memory"]
+    Sirpi Assistant [icon: aws-bedrock, label: "Sirpi Assistant / Amazon Nova Pro"]
+  }
+
+  External Integrations [icon: globe] {
+    GitHub [icon: github]
+    E2B Sandbox [icon: lambda, label: "E2B Sandbox"]
+  }
+
+  Artifact Storage [icon: aws-s3, label: "S3 - Artifact Storage"]
+}
+
+User AWS Account [icon: aws, label: "User's AWS Account - Cross-Account Deployment"] {
+  User Creates Stack [icon: aws-cloudformation] {
+    CloudFormation Stack [icon: aws-cloudformation, label: "CloudFormation Stack"]
+  }
+
+  Security [icon: shield] {
+    CrossAccount IAMRole [icon: aws-iam, label: "Cross-Account IAM Role"]
+  }
+
+  Container Registry [icon: aws-ecr] {
+    User ECR [icon: aws-ecr, label: "Amazon ECR"]
+  }
+
+  Terraform State [icon: aws-s3] {
+    StateFile S3 [icon: aws-s3, label: "State File S3 Backend"]
+    StateLock DynamoDB [icon: aws-dynamodb, label: "State Lock DynamoDB"]
+  }
+
+  Deployed Infrastructure [icon: aws-ec2] {
+    User VPC [icon: aws-vpc, label: "VPC"]
+    User ALB [icon: aws-elb, label: "Load Balancer"]
+    User ECS [icon: aws-ecs, label: "ECS Fargate"]
+  }
+}
+
+// Connections: User workflow
+Developer > Nextjs Frontend: 1. Access Platform [color: blue]
+Nextjs Frontend > Sirpi API Gateway [color: blue]
+Sirpi API Gateway > FastAPI Backend: 2. Analyze Repo [color: blue]
+Nextjs Frontend > Clerk Auth
+FastAPI Backend > Supabase
+
+FastAPI Backend > Orchestrator Agent: 3. Generate Files [color: blue]
+
+AgentCore Memory --> Dockerfile Generator: context [color: orange]
+AgentCore Memory --> Terraform Generator: context [color: orange]
+AgentCore Memory --> Sirpi Assistant: context [color: orange, style: dashed]
+
+Context Analyzer > GitHub
+Context Analyzer > E2B Sandbox
+
+Dockerfile Generator > Artifact Storage
+Terraform Generator > Artifact Storage
+
+FastAPI Backend > GitHub
+
+// Cross-account deployment flow
+Developer > CloudFormation Stack: 4. Create Stack [color: purple]
+CloudFormation Stack > CrossAccount IAMRole: 5. Creates Role [color: purple]
+FastAPI Backend > CrossAccount IAMRole: 6. AssumeRole [color: red]
+E2B Sandbox > User ECR: 8. Build & Push [color: red]
+E2B Sandbox > StateFile S3: 9. Terraform Apply [color: red]
+StateFile S3 --> StateLock DynamoDB [color: gray, style: dashed]
+StateFile S3 > User VPC: 10. Provision [color: green]
+StateFile S3 > User ALB [color: green]
+StateFile S3 > User ECS [color: green]
+User ALB > User ECS: Route Traffic [color: green]
+Developer --> Sirpi Assistant [color: purple, style: dashed]
+Orchestrator Agent > Specialized Agents
+E2B Sandbox <-- CrossAccount IAMRole: 7. Temp Credentials
+Developer < User ALB: 11. Live Application
+AgentCore Memory < Specialized Agents
+User ECR > User ECS: Pull Image [color: green]

@@ -8,7 +8,9 @@ FastAPI backend with Amazon Bedrock AgentCore multi-agent orchestration system.
 
 ### Core Components
 
-**FastAPI Application** - REST API with Server-Sent Events for real-time log streaming
+**FastAPI Application** - REST API with HTTP polling for real-time log delivery
+
+**API Gateway HTTP API** - Handles all REST endpoints with CORS configuration for frontend access
 
 **AgentCore Multi-Agent System** - Orchestration via Amazon Bedrock AgentCore Memory primitives
 - Orchestrator Agent
@@ -145,9 +147,12 @@ All code execution happens in isolated E2B cloud sandboxes for security:
 - Repository dependency analysis runs in sandbox environment
 - Docker image builds execute in isolated containers
 - Terraform plan and apply operations run in sandboxed environments
-- Real-time logs streamed from sandbox to frontend via Server-Sent Events
+- Real-time logs delivered via polling
 
 This ensures untrusted code in user repositories cannot compromise Sirpi infrastructure while providing full execution visibility.
+
+**Why Polling Instead of Streaming?**  
+API Gateway HTTP API buffers responses, preventing true Server-Sent Events streaming. Polling every 2 seconds provides acceptable near real-time experience for deployment operations that take minutes. Future improvement: migrate to Lambda Function URLs with response streaming for true real-time logs.
 
 ---
 
@@ -173,11 +178,19 @@ GET  /agents/status/{id}     Get status
 
 ### Deployments
 ```
-POST /deployments/create     Create deployment
-GET  /deployments/{id}       Get status
-POST /deployments/{id}/logs  Stream logs (SSE)
-DELETE /deployments/{id}     Delete deployment
+POST /deployment/projects/{project_id}/{operation}  Trigger deployment operation
+GET  /deployment/operations/{operation_id}/logs      Poll for logs (incremental fetch)
+GET  /deployment/operations/{operation_id}/status    Get operation status
+GET  /deployment/projects/{project_id}/logs          Get historical logs
+POST /deployment/projects/{project_id}/force-unlock Force unlock Terraform state
 ```
+
+**Log Polling Architecture:**
+- Backend stores logs in-memory during active deployments (up to 15 minutes)
+- Frontend polls `/logs?since_index=X` every 2 seconds
+- Only new logs since last index are returned (efficient)
+- Sessions auto-cleanup after 5 minutes of completion
+- API Gateway buffers prevent true SSE streaming, polling provides near real-time experience
 
 ### Assistant
 ```
@@ -215,10 +228,16 @@ Agents communicate via AgentCore Memory primitives, enabling stateful collaborat
 - Verify GitHub App credentials
 - Check callback URL matches configuration
 
-**E2B sandbox errors**
+**E2B sandbox timeout errors**
+- E2B sandboxes have 1-hour maximum timeout
 - Verify E2B API key is valid
 - Check sandbox execution logs
-- Ensure sandbox timeout is sufficient
+
+**Polling not updating**
+- Check browser console for polling debug logs
+- Verify operation_id is correct
+- Ensure session hasn't been cleaned up (5-minute retention)
+- Check API Gateway CORS configuration
 
 **Database connection issues**
 - Verify Supabase connection string

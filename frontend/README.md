@@ -10,7 +10,7 @@ Next.js 14 frontend with real-time deployment monitoring and AI assistant.
 
 **Authentication** - Clerk for secure user management
 
-**Real-time Updates** - Server-Sent Events for live deployment logs
+**Real-time Updates** - HTTP polling for live deployment logs via API Gateway
 
 **AI Chat** - Context-aware assistant powered by Amazon Nova Pro
 
@@ -83,17 +83,14 @@ const repos = await apiClient.get('/github/repos');
 const deployment = await apiClient.post('/deployments/create', data);
 ```
 
-### Real-time Logs (SSE)
+### Real-time Logs (HTTP Polling)
+- Polls `/deployment/operations/{operation_id}/logs?since_index=X` every 2 seconds
+- Backend returns only new logs since last index (efficient incremental fetch)
+- Frontend displays logs in real-time as they arrive
+- Automatic cleanup when operation completes
 
-```typescript
-const eventSource = new EventSource(
-  `${API_URL}/deployments/${id}/logs`
-);
-
-eventSource.onmessage = (event) => {
-  const log = JSON.parse(event.data);
-  console.log(log.message);
-};
+**Why polling?**  
+API Gateway HTTP API buffers responses, preventing true Server-Sent Events streaming. Polling at 2-second intervals provides acceptable near real-time experience for deployment operations that take minutes to complete.
 ```
 
 ---

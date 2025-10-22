@@ -79,7 +79,7 @@ Download all generated Terraform files and state files. Manage or delete your in
 4. **Review** - Generated files submitted as Pull Request to your repository
 5. **Setup** - Create CloudFormation stack in your AWS account using provided template, obtain IAM role ARN
 6. **Verify** - Backend assumes IAM role to verify cross-account access
-7. **Build & Push** - Docker image built in E2B sandbox and pushed to your ECR with real-time log streaming
+7. **Build & Push** - Docker image built in E2B sandbox and pushed to your ECR with real-time log polling
 8. **Deploy** - Terraform plan and apply executed in E2B sandbox, provisions infrastructure in your AWS account with live progress updates
 9. **Manage** - Monitor your infrastructure or destroy everything with one click (automatic state cleanup)
 
@@ -181,10 +181,13 @@ Sirpi meets AWS AI agent requirements:
 **Frontend**
 - Next.js 14, TypeScript, Tailwind CSS
 - Clerk Authentication
-- Server-Sent Events for real-time logs
+- Real-time log polling (2-second intervals via API Gateway)
 
 **Backend**
-- FastAPI (Python 3.11)
+- FastAPI (Python 3.11) on AWS Lambda
+- API Gateway HTTP API for REST endpoints
+- Long-running operations (15-minute Lambda timeout)
+- In-memory session storage for active deployments
 - Amazon Bedrock AgentCore
 - Amazon Nova Pro
 - E2B Sandboxes

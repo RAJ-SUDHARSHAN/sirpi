@@ -1,6 +1,6 @@
 from diagrams import Diagram, Cluster, Edge
 from diagrams.aws.compute import Lambda, ECS, ECR
-from diagrams.aws.network import VPC, ELB
+from diagrams.aws.network import VPC, ELB, APIGateway
 from diagrams.aws.storage import S3
 from diagrams.aws.database import RDS, Dynamodb
 from diagrams.aws.ml import Bedrock
@@ -22,17 +22,17 @@ urlretrieve(supabase_url, supabase_icon)
 
 # HIGH RESOLUTION settings for clarity
 graph_attr = {
-    "fontsize": "16",           # Larger font
+    "fontsize": "14",
     "bgcolor": "white",
-    "pad": "1.0",               # More padding
-    "ranksep": "2.5",           # More vertical spacing
-    "nodesep": "2.0",           # More horizontal spacing
+    "pad": "1.5",
+    "ranksep": "1.2",           # Tighter vertical spacing - keeps related steps close
+    "nodesep": "1.5",           # Reduce horizontal gap between left and right
     "splines": "ortho",
-    "dpi": "300"                # High DPI for clarity
+    "dpi": "600"
 }
 
 with Diagram(
-    "Sirpi - AI-Native DevOps Automation Platform\nBuilt with Amazon Bedrock AgentCore",
+    "Sirpi Architecture Diagram",
     show=False,
     direction="TB",
     filename="sirpi_architecture",
@@ -41,7 +41,7 @@ with Diagram(
 ):
     
     # USER
-    developer = User("Developer")
+    developer = User("Developer/User")
     
     # ============================================
     # SIRPI PLATFORM - AWS ACCOUNT
@@ -52,6 +52,10 @@ with Diagram(
         with Cluster("User Interface", graph_attr={"bgcolor": "#E3F2FD", "penwidth": "1.5"}):
             frontend = Lambda("Next.js 14")
             clerk = Custom("Clerk Auth", clerk_icon)
+        
+        # API Gateway Layer
+        with Cluster("API Layer", graph_attr={"bgcolor": "#F3E5F5", "penwidth": "1.5"}):
+            api_gateway = APIGateway("HTTP API Gateway")
         
         # Backend Layer
         with Cluster("Backend Services", graph_attr={"bgcolor": "#FCE4EC", "penwidth": "1.5"}):
@@ -107,19 +111,20 @@ with Diagram(
             ecs = ECS("ECS Fargate")
     
     # ============================================
-    # MAIN FLOW
+    # USER WORKFLOW SEQUENCE
     # ============================================
     
-    # User to frontend
-    developer >> Edge(color="#1565C0", style="bold", penwidth="2") >> frontend
-    frontend >> Edge(color="#1565C0", style="bold", penwidth="2") >> backend
+    # Step 1-3: User interacts with Sirpi platform
+    developer >> Edge(label="1. Access Platform", color="#1565C0", penwidth="2") >> frontend
+    frontend >> Edge(color="#1565C0", penwidth="2") >> api_gateway
+    api_gateway >> Edge(label="2. Analyze Repo", color="#1565C0", penwidth="2") >> backend
     
     # Auth and database
     frontend >> Edge(penwidth="1.5") >> clerk
     backend >> Edge(penwidth="1.5") >> supabase
     
-    # Trigger orchestration
-    backend >> Edge(color="#1565C0", style="bold", penwidth="2") >> orchestrator
+    # Step 3: Trigger orchestration
+    backend >> Edge(label="3. Generate Files", color="#1565C0", penwidth="2") >> orchestrator
     
     # Agent coordination
     orchestrator >> Edge(penwidth="1.5") >> context_analyzer
@@ -146,48 +151,47 @@ with Diagram(
     backend >> Edge(penwidth="1.5") >> github
     
     # ============================================
-    # CORRECT CROSS-ACCOUNT DEPLOYMENT FLOW
+    # CROSS-ACCOUNT DEPLOYMENT FLOW
     # ============================================
     
-    # Step 1: User creates CloudFormation stack (via frontend)
-    developer >> Edge(label="Create Stack", color="#9C27B0", style="bold", penwidth="2", fontsize="14") >> cfn
+    # Step 4: User creates CloudFormation stack in their AWS account
+    developer >> Edge(label="4. Create Stack", color="#9C27B0", penwidth="2") >> cfn
     
-    # Step 2: CloudFormation creates IAM role
-    cfn >> Edge(label="Creates", color="#9C27B0", style="bold", penwidth="2", fontsize="14") >> iam_role
+    # Step 5: CloudFormation creates IAM role
+    cfn >> Edge(label="5. Creates Role", color="#9C27B0", penwidth="2") >> iam_role
     
-    # Step 3: Backend assumes the IAM role
-    backend >> Edge(label="AssumeRole", color="#D84315", style="bold", penwidth="2", fontsize="14") >> iam_role
+    # Step 6: Backend assumes the IAM role for deployment
+    backend >> Edge(label="6. AssumeRole", color="#D84315", penwidth="2") >> iam_role
     
-    # Step 4: E2B uses assumed role credentials
-    iam_role >> Edge(label="Credentials", color="#D84315", style="dashed", penwidth="1.5", fontsize="12") >> e2b
+    # Step 7: E2B uses assumed role credentials
+    iam_role >> Edge(label="7. Temp Credentials", color="#D84315", style="dashed") >> e2b
     
-    # Step 5: E2B builds and pushes Docker image
-    e2b >> Edge(label="Push Image", color="#D84315", penwidth="2", fontsize="14") >> ecr
+    # Step 8: E2B builds and pushes Docker image
+    e2b >> Edge(label="8. Build & Push", color="#D84315", penwidth="2") >> ecr
     
-    # Step 6: E2B runs Terraform (with assumed credentials)
-    e2b >> Edge(label="Terraform\nPlan/Apply", color="#D84315", style="bold", penwidth="2", fontsize="14") >> terraform_state
+    # Step 9: E2B runs Terraform
+    e2b >> Edge(label="9. Terraform Apply", color="#D84315", penwidth="2") >> terraform_state
     
-    # Step 7: Terraform updates state
-    terraform_state >> Edge(label="Update", color="#757575", style="dotted", penwidth="1.5", fontsize="12") >> state_lock
+    # Terraform state management
+    terraform_state >> Edge(color="#757575", style="dotted") >> state_lock
     
-    # Step 8: Terraform provisions infrastructure
-    terraform_state >> Edge(label="Provision", color="#2E7D32", style="bold", penwidth="2", fontsize="14") >> vpc
-    terraform_state >> Edge(color="#2E7D32", penwidth="2") >> alb
-    terraform_state >> Edge(color="#2E7D32", penwidth="2") >> ecs
+    # Step 10: Terraform provisions infrastructure
+    terraform_state >> Edge(label="10. Provision", color="#2E7D32", penwidth="2") >> vpc
+    terraform_state >> Edge(color="#2E7D32") >> alb
+    terraform_state >> Edge(color="#2E7D32") >> ecs
     
     # Container runtime
-    ecs >> Edge(label="Pull", color="#2E7D32", penwidth="1.5", fontsize="12") >> ecr
-    alb >> Edge(label="Route", color="#2E7D32", penwidth="1.5", fontsize="12") >> ecs
+    ecs >> Edge(label="Pull Image", color="#2E7D32") >> ecr
+    alb >> Edge(label="Route Traffic", color="#2E7D32") >> ecs
     
-    # Final output
-    alb >> Edge(color="#1565C0", style="bold", penwidth="2") >> developer
+    # Step 11: User accesses deployed app
+    alb >> Edge(label="11. Live Application", color="#1565C0", penwidth="2") >> developer
     
     # Assistant support
     developer >> Edge(color="#6A1B9A", style="dotted", penwidth="1.5") >> sirpi_assistant
 
-print("✅ HIGH RESOLUTION architecture diagram generated!")
-print("   ✓ DPI: 300 (print quality)")
-print("   ✓ Larger fonts (16px)")
-print("   ✓ Thicker arrows (2px for main flow)")
-print("   ✓ More spacing between elements")
-print("   ✓ Thicker cluster borders for visibility")
+print("✅ Architecture diagram generated!")
+print("   ✓ Compact layout with clear flow")
+print("   ✓ Steps numbered and aligned")
+print("   ✓ API Gateway included")
+print("   ✓ High resolution (300 DPI)")

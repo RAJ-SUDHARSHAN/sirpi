@@ -6,6 +6,7 @@ import React, {
   useRef,
   useCallback,
 } from "react";
+import { useDeploymentPolling } from "@/hooks/useDeploymentPolling";
 import { useUser } from "@clerk/nextjs";
 import { useParams, useRouter } from "next/navigation";
 import { ansiToHtml } from "@/lib/utils/ansi-to-html";
@@ -113,19 +114,22 @@ export default function DeployPage() {
   const [isDestroying, setIsDestroying] = useState(false);
   const [showAWSSetup, setShowAWSSetup] = useState(false);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const logsEndRef = useRef<HTMLDivElement>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const maxReconnectAttempts = 3;
+  // Refs for each section's log container
+  const sectionLogRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const operationStartTime = useRef<number | null>(null);
+  const [activeOperationType, setActiveOperationType] = useState<'build_image' | 'plan' | 'apply' | null>(null);
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
-  // Auto-scroll when new logs are added to running sections
+  // Auto-scroll within the active section's log container only
   useEffect(() => {
-    const hasRunningSection = sections.some(s => s.status === "running");
-    if (logsEndRef.current && hasRunningSection) {
-      logsEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (activeSectionId && sectionLogRefs.current[activeSectionId]) {
+      const logContainer = sectionLogRefs.current[activeSectionId];
+      if (logContainer) {
+        // Scroll to bottom of the log container, not the page
+        logContainer.scrollTop = logContainer.scrollHeight;
+      }
     }
-  }, [sections.flatMap(s => s.logs).length]); // Trigger on log count change
+  }, [sections.flatMap(s => s.logs).length, activeSectionId]); // Trigger on log count change
 
   useEffect(() => {
     if (user) {
@@ -320,13 +324,19 @@ export default function DeployPage() {
     }
   }, [loadProject, projectSlug, userProjects]);
 
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
+  // Polling hook for deployment logs
+  const { isPolling, stopPolling } = useDeploymentPolling({
+    operationId: deploymentState.operationId,
+    enabled: deploymentState.isStreaming && !!activeSectionId,
+    onLog: (message: string) => {
+      if (activeSectionId) {
+        addLogToSection(activeSectionId, message.trim());
       }
-    };
-  }, []);
+    },
+    onComplete: (status, error) => {
+      handleOperationComplete(status, error);
+    },
+  });
 
   const toggleSection = (sectionId: string) => {
     setSections((prev) =>
@@ -420,7 +430,9 @@ export default function DeployPage() {
           ...prev,
           operationId: data.data.operation_id,
         }));
-        startEventStream(data.data.operation_id, operation, sectionId);
+        setActiveOperationType(operation);
+        setActiveSectionId(sectionId);
+        addLogToSection(sectionId, "🔗 Connected to deployment stream");
       } else {
         throw new Error(data.errors?.[0] || `Failed to start ${operation}`);
       }
@@ -436,132 +448,79 @@ export default function DeployPage() {
     }
   };
 
-  const startEventStream = (
-    operationId: string,
-    operation: "build_image" | "plan" | "apply",
-    sectionId: string
-  ) => {
-    const eventSource = new EventSource(
-      `${process.env.NEXT_PUBLIC_API_URL}/api/v1/deployment/operations/${operationId}/stream`
-    );
-    eventSourceRef.current = eventSource;
+  const handleOperationComplete = (status: 'completed' | 'failed', error?: string) => {
+    const sectionId = activeSectionId;
+    const operation = activeOperationType;
+    
+    if (!sectionId || !operation) return;
+    
+    const duration = operationStartTime.current
+      ? `${Math.round((Date.now() - operationStartTime.current) / 1000)}s`
+      : undefined;
 
-    eventSource.addEventListener("connected", (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        addLogToSection(sectionId, data.message || "Connected");
-      } catch (err) {
-        console.error("Parse error:", err);
-      }
-    });
+    if (status === "completed") {
+      updateSectionStatus(sectionId, "success", duration);
 
-    eventSource.addEventListener("log", (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.message) {
-          addLogToSection(sectionId, data.message.trim());
-        }
-      } catch (err) {
-        console.error("Parse error:", err);
-      }
-    });
+      setDeploymentState((prev) => {
+        const updates: Partial<DeploymentState> = { isStreaming: false };
 
-    eventSource.addEventListener("complete", (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        const duration = operationStartTime.current
-          ? `${Math.round((Date.now() - operationStartTime.current) / 1000)}s`
-          : undefined;
+        if (operation === "build_image") {
+          updates.currentStep = "built";
+          updates.imagePushed = true;
+        } else if (operation === "plan") {
+          updates.currentStep = "planned";
+          updates.planGenerated = true;
+        } else if (operation === "apply") {
+          updates.currentStep = "deployed";
+          updates.deployed = true;
 
-        if (data.status === "completed") {
-          updateSectionStatus(sectionId, "success", duration);
-
-          setDeploymentState((prev) => {
-            const updates: Partial<DeploymentState> = { isStreaming: false };
-
-            if (operation === "build_image") {
-              updates.currentStep = "built";
-              updates.imagePushed = true;
-            } else if (operation === "plan") {
-              updates.currentStep = "planned";
-              updates.planGenerated = true;
-            } else if (operation === "apply") {
-              updates.currentStep = "deployed";
-              updates.deployed = true;
-
-              // Refetch project to get terraform outputs
-              console.log(
-                "[Deploy] Deployment complete, fetching updated project data..."
-              );
-              setTimeout(async () => {
-                try {
-                  if (project?.id) {
-                    console.log("[Deploy] Fetching project by ID:", project.id);
-                    const updatedProject = await projectsApi.getProjectById(
-                      project.id
-                    );
-                    if (updatedProject) {
-                      console.log(
-                        "[Deploy] Updated project terraform_outputs:",
-                        updatedProject.terraform_outputs
-                      );
-                      setProject(updatedProject);
-                      console.log(
-                        "[Deploy] Project state updated successfully"
-                      );
-                    } else {
-                      console.warn("[Deploy] No project returned from API");
-                    }
-                  }
-                } catch (error) {
-                  console.error("Failed to refetch project:", error);
+          // Refetch project to get terraform outputs
+          console.log(
+            "[Deploy] Deployment complete, fetching updated project data..."
+          );
+          setTimeout(async () => {
+            try {
+              if (project?.id) {
+                console.log("[Deploy] Fetching project by ID:", project.id);
+                const updatedProject = await projectsApi.getProjectById(
+                  project.id
+                );
+                if (updatedProject) {
+                  console.log(
+                    "[Deploy] Updated project terraform_outputs:",
+                    updatedProject.terraform_outputs
+                  );
+                  setProject(updatedProject);
+                  console.log(
+                    "[Deploy] Project state updated successfully"
+                  );
+                } else {
+                  console.warn("[Deploy] No project returned from API");
                 }
-              }, 3000);
+              }
+            } catch (error) {
+              console.error("Failed to refetch project:", error);
             }
-
-            return { ...prev, ...updates };
-          });
-        } else if (data.status === "failed") {
-          updateSectionStatus(sectionId, "error", duration);
-          setDeploymentState((prev) => ({
-            ...prev,
-            currentStep: "failed",
-            error: data.error || "Operation failed",
-            isStreaming: false,
-          }));
+          }, 3000);
         }
-        stopStreaming();
-      } catch (err) {
-        console.error("Parse error:", err);
-      }
-    });
 
-    eventSource.onerror = () => {
-      if (reconnectAttemptsRef.current < maxReconnectAttempts) {
-        reconnectAttemptsRef.current++;
-        addLogToSection(
-          sectionId,
-          `Reconnecting (${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`
-        );
-        stopStreaming();
-        setTimeout(() => {
-          startEventStream(operationId, operation, sectionId);
-        }, 2000);
-      } else {
-        addLogToSection(sectionId, "Max reconnection attempts reached");
-        updateSectionStatus(sectionId, "error");
-        stopStreaming();
-      }
-    };
-  };
-
-  const stopStreaming = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+        return { ...prev, ...updates };
+      });
+    } else if (status === "failed") {
+      updateSectionStatus(sectionId, "error", duration);
+      setDeploymentState((prev) => ({
+        ...prev,
+        currentStep: "failed",
+        error: error || "Operation failed",
+        isStreaming: false,
+      }));
     }
-    reconnectAttemptsRef.current = 0;
+    
+    setActiveOperationType(null);
+    setActiveSectionId(null);
   };
+
+
 
   const handleDestroy = async () => {
     if (!project) return;
@@ -603,8 +562,9 @@ export default function DeployPage() {
           operationId: data.data.operation_id,
           isStreaming: true,
         }));
+        setActiveOperationType("apply");
+        setActiveSectionId("destroy");
         operationStartTime.current = Date.now();
-        startEventStream(data.data.operation_id, "apply", "destroy");
         toast.success("Destruction started");
       } else {
         throw new Error(data.errors?.[0] || "Failed to start destruction");
@@ -1132,7 +1092,10 @@ export default function DeployPage() {
                 </button>
 
                 {section.isExpanded && section.logs.length > 0 && (
-                  <div className="border-t border-[#333333] p-4 max-h-96 overflow-y-auto bg-black">
+                  <div 
+                    ref={(el) => { sectionLogRefs.current[section.id] = el; }}
+                    className="border-t border-[#333333] p-4 max-h-96 overflow-y-auto bg-black"
+                  >
                     <div className="font-mono text-[13px] text-[#fafafa] space-y-0.5 leading-relaxed">
                       {section.logs.map((log, index) => (
                         <div
@@ -1140,7 +1103,6 @@ export default function DeployPage() {
                           dangerouslySetInnerHTML={{ __html: ansiToHtml(log) }}
                         />
                       ))}
-                      {section.status === "running" && <div ref={logsEndRef} />}
                     </div>
                   </div>
                 )}

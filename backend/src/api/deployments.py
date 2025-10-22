@@ -178,6 +178,45 @@ async def get_deployment_operation_status(
     }
 
 
+@router.get("/deployment/operations/{operation_id}/logs")
+async def get_deployment_operation_logs(
+    operation_id: str,
+    since_index: int = 0,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Get deployment logs since a specific index (for polling).
+    Returns logs from since_index onwards.
+    """
+    if operation_id not in active_deployment_sessions:
+        return {
+            "success": False,
+            "error": "Operation not found or expired"
+        }
+    
+    session = active_deployment_sessions[operation_id]
+    
+    # Verify ownership
+    if session.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    logs = session.get("logs", [])
+    new_logs = logs[since_index:] if since_index < len(logs) else []
+    
+    return {
+        "success": True,
+        "data": {
+            "operation_id": operation_id,
+            "status": session["status"],
+            "logs": new_logs,
+            "total_logs": len(logs),
+            "next_index": len(logs),
+            "completed": session["status"] in ["completed", "failed"],
+            "error": session.get("error")
+        }
+    }
+
+
 @router.get("/deployment/operations/{operation_id}/stream")
 async def stream_project_deployment_logs(operation_id: str):
     """

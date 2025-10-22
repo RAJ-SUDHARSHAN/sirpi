@@ -87,10 +87,9 @@ class DockerBuildService:
 
             # Get AWS credentials by assuming user's role
             add_log("🔐 Assuming AWS role in your account...")
+            # Lambda uses execution role automatically - no explicit credentials needed
             sts = boto3.client(
                 "sts",
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
                 region_name=settings.aws_region
             )
             

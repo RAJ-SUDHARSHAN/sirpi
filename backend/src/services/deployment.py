@@ -944,11 +944,9 @@ export AWS_DEFAULT_REGION="{settings.aws_region}"
         logger.info(f"🔑 External ID: {external_id}")
         
         try:
-            # Use Sirpi's AWS credentials to call STS
+            # Lambda uses execution role automatically - no explicit credentials needed
             sts_client = boto3.client(
                 "sts",
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
                 region_name=settings.aws_region
             )
 

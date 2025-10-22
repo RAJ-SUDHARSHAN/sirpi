@@ -13,7 +13,7 @@ from src.agentcore.agents.terraform_generator import TerraformGeneratorAgent
 from src.services.github_app import get_github_app
 from src.services.s3_storage import get_s3_storage
 from src.services.supabase import supabase
-from src.services.agentcore_memory import get_agentcore_memory
+from src.services.agentcore_memory_real import get_agentcore_memory
 from src.models import WorkflowStatus
 from src.utils.session_logger import attach_session_logger, detach_session_logger
 
@@ -140,15 +140,40 @@ class WorkflowOrchestrator:
             session: Active session dict (updated in-place)
         """
 
+        log_handler = None
         try:
             owner, repo = parse_github_url(repository_url)
 
             self._session = session
             
-            # Create AgentCore memory store for this session
-            self._memory_data = self.agentcore_memory.create_session_memory(session_id)
+            # Create REAL AWS AgentCore Memory resource
+            self._add_log(session, "orchestrator", "Creating AWS AgentCore Memory resource...")
+            self._memory_data = await self.agentcore_memory.create_memory(
+                session_id=session_id,
+                description=f"Infrastructure generation for {owner}/{repo}"
+            )
             session["agentcore_memory"] = self._memory_data
-            self._add_log(session, "orchestrator", "Created AgentCore memory store for agent collaboration")
+            self._add_log(session, "orchestrator", f"✅ AgentCore Memory created: {self._memory_data['id']}")
+            self._add_log(session, "orchestrator", f"   ARN: {self._memory_data['arn']}")
+            
+            # Save AgentCore Memory ID to database for persistence
+            try:
+                with supabase.get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE generations
+                            SET agentcore_memory_id = %s,
+                                agentcore_memory_arn = %s,
+                                updated_at = NOW()
+                            WHERE session_id = %s
+                            """,
+                            (self._memory_data['id'], self._memory_data['arn'], session_id)
+                        )
+                self._add_log(session, "orchestrator", "✅ Saved AgentCore Memory ID to database")
+                logger.info(f"✅ Saved AgentCore Memory ID to database")
+            except Exception as db_error:
+                logger.warning(f"Failed to save memory ID to database: {db_error}")
 
             # Attach session logger to capture backend logs
             from src.api.workflows import active_sessions
@@ -173,14 +198,15 @@ class WorkflowOrchestrator:
 
             raw_data = await self.github_analyzer.analyze_repository(installation_id, owner, repo)
 
-            # Store GitHub analysis in AgentCore memory
-            self.agentcore_memory.store_item(
-                self._memory_data,
-                "github-analysis",
-                raw_data.dict(),
-                "github_analyzer"
+            # Store GitHub analysis in REAL AgentCore Memory
+            await self.agentcore_memory.store_agent_event(
+                memory_id=self._memory_data["id"],
+                actor_id="github_analyzer",
+                event_type="analysis_complete",
+                content=raw_data.dict(),
+                session_id=session_id
             )
-            self._add_log(session, "github_analyzer", "Stored repository analysis in AgentCore memory")
+            self._add_log(session, "github_analyzer", "✅ Stored repository analysis in AgentCore Memory")
 
             self._add_log(
                 session,
@@ -221,14 +247,15 @@ class WorkflowOrchestrator:
                 thinking_callback=self._thinking_callback,
             )
             
-            # Store context analysis in AgentCore memory
-            self.agentcore_memory.store_item(
-                self._memory_data,
-                "context-analysis",
-                context.dict(),
-                "context_analyzer"
+            # Store context analysis in REAL AgentCore Memory
+            await self.agentcore_memory.store_agent_event(
+                memory_id=self._memory_data["id"],
+                actor_id="context_analyzer",
+                event_type="context_analysis_complete",
+                content=context.dict(),
+                session_id=session_id
             )
-            self._add_log(session, "context_analyzer", "Stored context analysis in AgentCore memory")
+            self._add_log(session, "context_analyzer", "✅ Stored context analysis in AgentCore Memory")
 
             self._add_log(
                 session,
@@ -273,12 +300,13 @@ class WorkflowOrchestrator:
                 thinking_callback=self._thinking_callback,
             )
 
-            # Store Dockerfile in memory
-            self.agentcore_memory.store_item(
-                self._memory_data,
-                "dockerfile",
-                dockerfile,
-                "dockerfile_generator"
+            # Store Dockerfile in REAL AgentCore Memory
+            await self.agentcore_memory.store_agent_event(
+                memory_id=self._memory_data["id"],
+                actor_id="dockerfile_generator",
+                event_type="dockerfile_generated",
+                content={"dockerfile": dockerfile},
+                session_id=session_id
             )
 
             session["files"].append(
@@ -316,12 +344,13 @@ class WorkflowOrchestrator:
                 thinking_callback=self._thinking_callback,
             )
 
-            # Store Terraform files in memory
-            self.agentcore_memory.store_item(
-                self._memory_data,
-                "terraform-files",
-                terraform_files,
-                "terraform_generator"
+            # Store Terraform files in REAL AgentCore Memory
+            await self.agentcore_memory.store_agent_event(
+                memory_id=self._memory_data["id"],
+                actor_id="terraform_generator",
+                event_type="terraform_generated",
+                content={"files": list(terraform_files.keys())},
+                session_id=session_id
             )
 
             for filename, content in terraform_files.items():
@@ -390,8 +419,9 @@ class WorkflowOrchestrator:
                 logger.error(f"Failed to update error status: {db_error}", exc_info=True)
 
         finally:
-            # Detach session logger
-            detach_session_logger(log_handler)
+            # Detach session logger if it was attached
+            if log_handler:
+                detach_session_logger(log_handler)
 
     def _add_log(self, session: Dict, agent: str, message: str, level: str = "INFO"):
         """Add log entry to session."""

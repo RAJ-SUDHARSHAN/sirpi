@@ -1,84 +1,225 @@
 # Sirpi Backend
 
-FastAPI backend for AI-Native DevOps Automation Platform.
-
-**AWS Lambda optimized with Supabase Transaction Pooler (Port 6543)**
-
-## Quick Start
-
-```bash
-# Install dependencies
-uv venv && source .venv/bin/activate
-uv pip install -e .
-
-# Configure environment
-cp .env.example .env
-
-# Run locally
-uvicorn src.main:app --reload --port 8000
-
-# API docs: http://localhost:8000/docs
-```
-
-## Environment Variables
-
-```bash
-# Required
-CLERK_SECRET_KEY=sk_test_...
-SUPABASE_USER=postgres.your-project
-SUPABASE_PASSWORD=your-password
-SUPABASE_HOST=your-project.supabase.co
-SUPABASE_PORT=6543
-SUPABASE_DBNAME=postgres
-
-# AWS (for Bedrock)
-AWS_REGION=us-west-2
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=...
-
-# GitHub App
-GITHUB_APP_ID=your-app-id
-GITHUB_APP_CLIENT_ID=your-client-id
-GITHUB_APP_CLIENT_SECRET=your-client-secret
-GITHUB_APP_PRIVATE_KEY_PATH=./github-app-private-key.pem
-GITHUB_APP_WEBHOOK_SECRET=your-webhook-secret
-```
-
-## Database Setup
-
-Run `database/schema.sql` in Supabase SQL Editor.
-
-## API Endpoints
-
-- `GET /api/v1/health` - Health check
-- `POST /api/v1/projects/import` - Import GitHub repository
-- `GET /api/v1/projects` - List projects
-- `POST /api/v1/workflows/start` - Start infrastructure generation
-- `GET /api/v1/workflows/stream/{session_id}` - Stream workflow progress
-
-## Development
-
-```bash
-# Install dev dependencies
-uv sync --dev
-
-# Format code
-uv run black src/
-
-# Lint
-uv run ruff check src/
-
-# Type check
-uv run mypy src/
-```
-
-## Deployment to Lambda
-
-1. Package: `uv pip install -t package/ -e . && zip -r function.zip .`
-2. Create Lambda function with handler `src.lambda_handler.handler`
-3. Set environment variables (use Transaction Pooler for Supabase)
-4. Configure API Gateway integration
+FastAPI backend with Amazon Bedrock AgentCore multi-agent orchestration system.
 
 ---
 
+## Architecture
 
+### Core Components
+
+**FastAPI Application** - REST API with Server-Sent Events for real-time log streaming
+
+**AgentCore Multi-Agent System** - Orchestration via Amazon Bedrock AgentCore Memory primitives
+- Orchestrator Agent
+- Context Analyzer Agent  
+- Dockerfile Generator Agent
+- Terraform Generator Agent
+
+**AI Assistant** - Amazon Nova Pro for context-aware deployment support
+
+**External Tool Integration** - GitHub API, E2B sandboxes for secure isolated code execution
+
+**Database** - Supabase PostgreSQL for deployment metadata and user management
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- UV package manager
+- AWS Account with Bedrock access
+- Supabase account
+- GitHub App credentials
+- E2B API key
+
+### Installation
+
+```bash
+cd backend
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
+# Install UV
+pip install uv
+
+# Install dependencies
+uv pip install -r requirements.txt
+```
+
+### Environment Configuration
+
+Create `.env` in the backend directory:
+
+```bash
+# AWS
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_ACCOUNT_ID=your_account_id
+
+# Amazon Bedrock
+BEDROCK_AGENT_ID=your_agent_id
+BEDROCK_AGENT_ALIAS_ID=your_alias_id
+BEDROCK_REGION=us-east-1
+
+# Database
+DATABASE_URL=postgresql://user:pass@host:5432/dbname
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your_supabase_key
+
+# GitHub App
+GITHUB_APP_ID=your_app_id
+GITHUB_APP_PRIVATE_KEY=your_private_key
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
+
+# Clerk
+CLERK_SECRET_KEY=sk_test_your_key
+
+# E2B
+E2B_API_KEY=your_e2b_key
+
+# Application
+API_URL=http://localhost:8000
+FRONTEND_URL=http://localhost:3000
+```
+
+### Running the Server
+
+```bash
+# Development
+uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+
+# Production
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+API documentation available at `https://sirpi.rajs.dev/api/docs`
+
+---
+
+## AgentCore System
+
+### Multi-Agent Architecture
+
+Sirpi uses Amazon Bedrock AgentCore for stateful agent collaboration:
+
+```python
+# Agents share context via AgentCore Memory
+orchestrator = OrchestratorAgent(memory_store)
+context_analyzer = ContextAnalyzerAgent(memory_store)
+dockerfile_generator = DockerfileGeneratorAgent(memory_store)
+terraform_generator = TerraformGeneratorAgent(memory_store)
+
+# Workflow with memory sharing
+context = await context_analyzer.analyze(repo_url)
+dockerfile = await dockerfile_generator.generate()  # Reads context from memory
+terraform = await terraform_generator.generate()    # Reads from memory
+```
+
+### AgentCore Memory
+
+Enables agents to share state and build on each other's work:
+
+```python
+# Write analysis to memory
+await memory_store.put("repository_context", context_data)
+
+# Subsequent agents read shared context
+context = await memory_store.get("repository_context")
+```
+
+### External Tool Integration
+
+**GitHub API Integration**  
+OAuth-based repository access for cloning and analyzing code. Automated Pull Request creation with generated artifacts.
+
+**E2B Sandbox Execution**  
+All code execution happens in isolated E2B cloud sandboxes for security:
+
+- Repository dependency analysis runs in sandbox environment
+- Docker image builds execute in isolated containers
+- Terraform plan and apply operations run in sandboxed environments
+- Real-time logs streamed from sandbox to frontend via Server-Sent Events
+
+This ensures untrusted code in user repositories cannot compromise Sirpi infrastructure while providing full execution visibility.
+
+---
+
+## API Endpoints
+
+### Health
+```
+GET /health
+```
+
+### GitHub
+```
+GET  /github/app/callback    OAuth callback
+GET  /github/repos           List repositories
+POST /github/analyze         Analyze repository
+```
+
+### Agents
+```
+POST /agents/orchestrate     Trigger workflow
+GET  /agents/status/{id}     Get status
+```
+
+### Deployments
+```
+POST /deployments/create     Create deployment
+GET  /deployments/{id}       Get status
+POST /deployments/{id}/logs  Stream logs (SSE)
+DELETE /deployments/{id}     Delete deployment
+```
+
+### Assistant
+```
+POST /assistant/chat         Chat with AI
+GET  /assistant/context/{id} Get deployment context
+```
+
+---
+
+**Reasoning LLMs for Decision-Making**  
+Amazon Bedrock models power all agent decisions—analyzing tech stacks, selecting optimal base images, determining resource requirements, and generating production-ready configurations.
+
+**Autonomous Capabilities**  
+Multi-agent workflow executes end-to-end autonomously. Agents coordinate repository analysis, artifact generation, and infrastructure deployment without human intervention. User approval only required for security gates: Pull Request review, CloudFormation IAM role setup, and final deployment confirmation.
+
+**External Tool Integration**
+- GitHub API for repository access and PR management
+- E2B Sandboxes for secure, isolated code execution
+- Terraform for infrastructure provisioning
+- AWS APIs for cross-account deployment
+- DynamoDB for state locking
+
+**Agent-to-Agent Collaboration**  
+Agents communicate via AgentCore Memory primitives, enabling stateful collaboration where each agent builds on previous agents' work.
+
+---
+
+## Troubleshooting
+
+**AgentCore connection errors**
+- Verify AWS credentials and Bedrock access
+- Check agent ID and alias configuration
+
+**GitHub OAuth failures**
+- Verify GitHub App credentials
+- Check callback URL matches configuration
+
+**E2B sandbox errors**
+- Verify E2B API key is valid
+- Check sandbox execution logs
+- Ensure sandbox timeout is sufficient
+
+**Database connection issues**
+- Verify Supabase connection string
+- Check database migrations applied

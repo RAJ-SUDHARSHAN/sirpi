@@ -19,6 +19,9 @@ dependencies = [
     "sse-starlette>=2.1.0",
     "pyjwt[crypto]>=2.8.0",
     "e2b-code-interpreter>=2.1.1",
+    "bedrock-agentcore>=1.0.3",
+    "bedrock-agentcore-starter-toolkit>=0.1.26",
+    "diagrams>=0.24.4",
 ]
 
 [project.optional-dependencies]

@@ -1,73 +1,108 @@
 # Sirpi Frontend
 
-Next.js frontend for AI-Native DevOps Automation Platform.
+Next.js 14 frontend with real-time deployment monitoring and AI assistant.
 
-**TypeScript + Tailwind CSS + Clerk Auth**
+---
 
-## Quick Start
+## Architecture
+
+### Core Features
+
+**Authentication** - Clerk for secure user management
+
+**Real-time Updates** - Server-Sent Events for live deployment logs
+
+**AI Chat** - Context-aware assistant powered by Amazon Nova Pro
+
+**Repository Management** - GitHub OAuth integration
+
+**Deployment Dashboard** - Live status tracking and infrastructure management
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 20+
+- npm or yarn
+- Clerk account
+
+### Installation
 
 ```bash
-# Install dependencies
+cd frontend
+
 npm install
+# or
+yarn install
+```
 
-# Configure environment
-cp .env.example .env.local
+### Environment Configuration
 
-# Run development server
+Create `.env.local`:
+
+```bash
+# API
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# Clerk
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your_key
+CLERK_SECRET_KEY=sk_test_your_key
+
+# Application
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+### Running
+
+```bash
+# Development
 npm run dev
 
-# Available at: http://localhost:3000
-```
-
-## Environment Variables
-
-```bash
-# Clerk Authentication
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-
-# API URLs
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-
-# GitHub App Configuration
-NEXT_PUBLIC_GITHUB_APP_NAME=your-app-name
-NEXT_PUBLIC_GITHUB_BASE_URL=https://github.com
-NEXT_PUBLIC_GITHUB_API_BASE_URL=https://api.github.com
-```
-
-## Development
-
-```bash
-# Lint code
-npm run lint
-
-# Build for production
+# Production build
 npm run build
+npm start
 
-# Start production server
-npm run start
+# Lint
+npm run lint
 ```
 
-## Project Structure
+Application available at `http://localhost:3000`
 
-- `src/app/` - Next.js App Router pages and layouts
-- `src/components/` - Reusable React components
-- `src/lib/` - API clients and utilities
-- `src/middleware.ts` - Route protection middleware
+---
 
-## Key Features
+## API Integration
 
-- 🔐 **Authentication** - Clerk-powered user management
-- 🔗 **GitHub Integration** - Repository import and management
-- 📊 **Real-time Updates** - Server-Sent Events for live progress
-- 🎨 **Responsive Design** - Mobile-first Tailwind CSS
-- 🌙 **Dark Mode** - Theme switching support
+### API Client
 
-## Deployment
+```typescript
+import { apiClient } from '@/lib/api';
 
-```bash
-# Deploy to Vercel
-npm i -g vercel
-vercel --prod
+const repos = await apiClient.get('/github/repos');
+const deployment = await apiClient.post('/deployments/create', data);
 ```
+
+### Real-time Logs (SSE)
+
+```typescript
+const eventSource = new EventSource(
+  `${API_URL}/deployments/${id}/logs`
+);
+
+eventSource.onmessage = (event) => {
+  const log = JSON.parse(event.data);
+  console.log(log.message);
+};
+```
+
+---
+
+### Environment Variables
+
+Required in deployment platform:
+- `NEXT_PUBLIC_API_URL`
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+
+---

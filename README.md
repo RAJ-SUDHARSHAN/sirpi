@@ -1,333 +1,227 @@
 # Sirpi - AI-Native DevOps Automation Platform
 
-> Democratizing infrastructure deployment through AI-powered automation
-
 <div align="center">
 
-[![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock%20AgentCore-FF9900?logo=amazon-aws)](https://aws.amazon.com/bedrock/)
-[![Hackathon](https://img.shields.io/badge/AWS%20Bedrock-Devpost%20Hackathon-success)](https://amazonbedrock.devpost.com/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Sirpi Logo](./frontend/public/sirpi-logo-horizontal.png)
 
-[Demo](#-demo) • [Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture)
+**Transform GitHub repositories into production-ready AWS infrastructure**
+
+[![Built with Amazon Bedrock](https://img.shields.io/badge/Built%20with-Amazon%20Bedrock-orange)](https://aws.amazon.com/bedrock/)
+[![AgentCore](https://img.shields.io/badge/AgentCore-Multi--Agent-blue)](https://aws.amazon.com/bedrock/agentcore/)
 
 </div>
 
 ---
 
-## 🎯 What is Sirpi?
+## What is Sirpi?
 
-**Sirpi** (Tamil for "sculptor") transforms raw GitHub repositories into production-ready AWS infrastructure. Just connect your repo, and watch as AI agents analyze your code and generate:
-
-- 🐳 **Dockerfiles** - Optimized for your stack
-- ☁️ **Terraform configs** - Complete AWS infrastructure
-- 🔄 **CI/CD workflows** - Automated deployment pipelines
-- 📊 **Real-time logs** - Watch your deployment happen live
-
-**No DevOps expertise required.**
+Sirpi (*Tamil: sculptor*) is an AI-native DevOps automation platform that transforms GitHub repositories into production-ready AWS infrastructure. Using Amazon Bedrock AgentCore's multi-agent orchestration, Sirpi analyzes codebases, generates optimized Dockerfiles and Terraform configurations, and deploys complete cloud infrastructure—no DevOps expertise required.
 
 ---
 
-## ✨ Features
+## Key Features
 
-### 🤖 **AI-Powered Analysis**
-- Automatic language and framework detection
-- Dependency analysis and optimization
-- Best practices baked in
+**Multi-Agent AI System**  
+Specialized agents collaborate via Amazon Bedrock AgentCore Memory for stateful context sharing across the workflow.
 
-### 🏗️ **Infrastructure as Code**
-- Complete Terraform configurations
-- ECS Fargate deployments
-- Load balancers and auto-scaling
-- Secure VPC networking
+**Smart Containerization**  
+Automatic Dockerfile generation optimized for your specific tech stack and dependencies.
 
-### 🔗 **GitHub Integration**
-- Connect via GitHub App
-- Auto-generate infrastructure PRs
-- Merge to deploy automatically
+**Infrastructure as Code**  
+Production-ready Terraform configurations for complete AWS infrastructure provisioning.
 
-### ☁️ **AWS Deployment**
-- Cross-account role assumption
-- One-click CloudFormation setup
-- Real-time deployment logs
-- Direct application URLs
+**Secure Cross-Account Deployment**  
+Deploy into your own AWS account using IAM role assumption—no access keys or credentials shared.
 
-### 📊 **Enterprise Ready**
-- Multi-agent orchestration via Bedrock AgentCore
-- S3-backed file storage with versioning
-- Supabase PostgreSQL database
-- Production-grade error handling
+**Sandboxed Execution**  
+All Docker builds and Terraform operations execute in isolated E2B sandboxes with real-time log streaming to the frontend.
+
+**Complete CI/CD Pipeline**  
+From GitHub URL to live application in minutes with real-time deployment tracking.
+
+**AI Assistant**  
+Context-aware support powered by Amazon Nova Pro with full deployment history access via AgentCore Memory.
+
+**No Vendor Lock-in**  
+Download all generated Terraform files and state files. Manage or delete your infrastructure anytime. Migrate to other platforms if needed—you own all the code.
 
 ---
 
-## 🚀 Quick Start
+## Architecture
+
+![Sirpi Architecture](./sirpi_architecture_diagram.png)
+
+### System Components
+
+**Sirpi Platform**
+- Frontend: Next.js 14 with Clerk authentication
+- Backend: FastAPI on AWS Lambda
+- Multi-Agent System: Amazon Bedrock AgentCore
+  - Orchestrator Agent
+  - Context Analyzer Agent
+  - Dockerfile Generator Agent
+  - Terraform Generator Agent
+- AI Assistant: Amazon Nova Pro
+- External Tools: E2B Sandboxes for secure code execution
+- Storage: S3 for artifacts, Supabase for metadata
+
+**User's AWS Account**
+- Security: Cross-account IAM role with least-privilege access
+- Container Registry: Amazon ECR
+- Infrastructure: Provisioned via Terraform (VPC, Load Balancer, compute resources)
+- State Management: S3 backend with DynamoDB locking
+
+### How It Works
+
+1. **Connect** - Link your GitHub repository through OAuth
+2. **Analyze** - AI agents examine your codebase, detect tech stack, and analyze dependencies using GitHub API
+3. **Generate** - Create optimized Dockerfile and Terraform configurations via LLM reasoning
+4. **Review** - Generated files submitted as Pull Request to your repository
+5. **Setup** - Create CloudFormation stack in your AWS account using provided template, obtain IAM role ARN
+6. **Verify** - Backend assumes IAM role to verify cross-account access
+7. **Build & Push** - Docker image built in E2B sandbox and pushed to your ECR with real-time log streaming
+8. **Deploy** - Terraform plan and apply executed in E2B sandbox, provisions infrastructure in your AWS account with live progress updates
+9. **Manage** - Monitor your infrastructure or destroy everything with one click (automatic state cleanup)
+
+### E2B Sandbox Integration
+
+All code execution happens in isolated E2B sandboxes for security:
+
+- **Repository Analysis** - Clone and analyze dependencies in sandbox environment
+- **Docker Builds** - Build container images safely without exposing Sirpi infrastructure
+- **Terraform Execution** - Run infrastructure provisioning commands in isolated environment
+- **Real-time Streaming** - All sandbox logs streamed live to frontend via Server-Sent Events
+
+This ensures malicious code in user repositories cannot compromise the Sirpi platform while providing full visibility into execution.
+
+---
+
+## Quick Start
 
 ### Prerequisites
-- AWS Account (for deployment)
-- GitHub Account (for repository access)
-- Node.js 18+ and Python 3.12+
 
-### 1. Clone Repository
-```bash
-git clone https://github.com/YOUR_USERNAME/sirpi-aws-devpost.git
-cd sirpi-aws-devpost
-```
+- AWS Account
+- GitHub Account
+- Node.js 20+ and Python 3.11+
+- UV package manager
 
-### 2. Setup Backend
+### Installation
+
 ```bash
+git clone https://github.com/yourusername/sirpi.git
+cd sirpi
+
+# Backend setup
 cd backend
-
-# Install dependencies (uses uv)
-pip install uv
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate
 uv pip install -r requirements.txt
+cp .env.example .env  # Configure your environment
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your credentials
-
-# Run locally
-uv run uvicorn src.main:app --reload
-```
-
-### 3. Setup Frontend
-```bash
-cd frontend
-
-# Install dependencies
+# Frontend setup
+cd ../frontend
 npm install
+cp .env.local.example .env.local  # Configure your environment
 
-# Configure environment
-cp .env.local.example .env.local
-# Add your Clerk keys
-
-# Run development server
-npm run dev
+# Start development servers
+cd backend && uvicorn src.main:app --reload
+cd frontend && npm run dev
 ```
 
-### 4. Setup Database
-```bash
-# In Supabase Dashboard → SQL Editor, run:
-backend/database/schema.sql
-```
+### Configuration
 
-### 5. Deploy Backend to AWS Lambda
-```bash
-cd infrastructure
-npm install
-cdk bootstrap  # First time only
-cdk deploy SirpiBackendStack
-```
+See individual documentation:
+- [Backend Setup](./backend/README.md)
+- [Frontend Setup](./frontend/README.md)
 
 ---
 
-## 🏛️ Architecture
-
-### High-Level Overview
+## Repository Structure
 
 ```
-┌─────────────┐
-│   GitHub    │────────────┐
-│    Repo     │            │
-└─────────────┘            ↓
-                    ┌─────────────┐
-┌─────────────┐    │   FastAPI   │    ┌──────────────┐
-│  Next.js    │───→│   Backend   │───→│   Bedrock    │
-│  Frontend   │    │  (Lambda)   │    │  AgentCore   │
-└─────────────┘    └─────────────┘    └──────────────┘
-                           │                   │
-                           ↓                   ↓
-                    ┌─────────────┐    ┌──────────────┐
-                    │  Supabase   │    │      S3      │
-                    │  PostgreSQL │    │  (Files)     │
-                    └─────────────┘    └──────────────┘
-                           │
-                           ↓
-                    ┌─────────────┐
-                    │   AWS ECS   │
-                    │   Fargate   │────→ 🚀 Your App
-                    └─────────────┘
-```
-
-### Multi-Agent System
-
-Powered by **Amazon Bedrock AgentCore**, Sirpi orchestrates specialized AI agents:
-
-1. **Context Analyzer** - Detects languages, frameworks, dependencies
-2. **Dockerfile Generator** - Creates optimized container configs
-3. **Terraform Generator** - Generates complete infrastructure
-4. **Orchestrator** - Coordinates agent workflows and memory
-
----
-
-## 📁 Project Structure
-
-```
-sirpi-aws-devpost/
-├── backend/                    # FastAPI backend
-│   ├── src/
-│   │   ├── agentcore/         # Bedrock agent orchestration
-│   │   ├── api/               # REST endpoints
-│   │   ├── services/          # Business logic
-│   │   └── models/            # Data models
-│   └── database/
-│       └── schema.sql         # Complete DB schema
-│
-├── frontend/                   # Next.js frontend
-│   ├── src/
-│   │   ├── app/               # Next.js 14 app router
-│   │   ├── components/        # React components
-│   │   └── lib/               # Utilities
-│   └── public/
-│
-├── infrastructure/             # AWS CDK
-│   ├── lib/                   # Stack definitions
-│   └── cdk.json
-│
-└── scripts/                    # Automation
-    ├── production_cleanup.sh
-    └── security_audit.sh
+sirpi/
+├── backend/              FastAPI backend with AgentCore agents
+├── frontend/             Next.js frontend application
+├── infrastructure/       AWS CDK infrastructure for Sirpi platform
+└── README.md
 ```
 
 ---
 
-## 🛠️ Technology Stack
+## Agent System
 
-### Backend
-- **FastAPI** - High-performance Python API framework
-- **AWS Lambda** - Serverless deployment via Mangum
-- **Bedrock AgentCore** - Multi-agent orchestration
-- **Boto3** - AWS SDK for Python
-- **UV** - Fast Python package manager
+Sirpi uses Amazon Bedrock AgentCore for multi-agent collaboration. Agents communicate through AgentCore Memory primitives to share context and build on each other's analysis.
 
-### Frontend
-- **Next.js 14** - React framework with App Router
-- **TypeScript** - Type-safe JavaScript
-- **Tailwind CSS** - Utility-first styling
-- **Clerk** - Authentication and user management
-- **Shadcn/ui** - Beautiful UI components
+**Orchestrator Agent** - Coordinates workflow and delegates to specialized agents
 
-### Infrastructure
-- **AWS ECS Fargate** - Serverless container deployment
-- **Terraform** - Infrastructure as Code
-- **AWS CDK** - Cloud Development Kit
-- **Supabase** - PostgreSQL database
-- **Amazon S3** - File storage with versioning
+**Context Analyzer** - Examines repository structure, detects tech stack, analyzes dependencies. Integrates with GitHub API and E2B sandboxes for safe code execution.
 
----
+**Dockerfile Generator** - Creates optimized, production-ready container configurations using LLM reasoning based on detected tech stack
 
-## 🔐 Security
+**Terraform Generator** - Generates complete infrastructure-as-code using LLM with context from previous agents
 
-### Best Practices
-- ✅ Cross-account IAM roles (no long-lived credentials)
-- ✅ Environment variables for secrets
-- ✅ GitHub App permissions (read-only by default)
-- ✅ CloudFormation for secure AWS setup
-- ✅ HTTPS everywhere
+**AgentCore Memory** - Enables stateful collaboration between agents without hardcoded workflows. Each agent reads context from memory and writes its results for subsequent agents.
 
-### Setup AWS Connection
-```bash
-# 1. Deploy CloudFormation template
-aws cloudformation create-stack \
-  --stack-name sirpi-setup \
-  --template-body file://infrastructure/sirpi-setup.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameters ParameterKey=SirpiAccountId,ParameterValue=YOUR_SIRPI_AWS_ACCOUNT_ID
+### AI Agent Qualifications
 
-# 2. Copy Role ARN from outputs
-# 3. Add to Sirpi dashboard under "Connect AWS"
-```
+Sirpi meets AWS AI agent requirements:
+
+**Reasoning LLMs** - Amazon Bedrock models power all agent decision-making for analysis, generation, and optimization
+
+**Autonomous Capabilities** - Multi-agent workflow executes end-to-end with minimal human input (only repository selection and approval gates)
+
+**External Tool Integration** - GitHub API for repository access, E2B sandboxes for secure code execution, Terraform for infrastructure provisioning
+
+**Agent Collaboration** - Agents communicate via AgentCore Memory primitives for stateful, context-aware operations
 
 ---
 
-## 📊 Database Schema
+## Technology Stack
 
-<details>
-<summary>View Schema</summary>
+**Frontend**
+- Next.js 14, TypeScript, Tailwind CSS
+- Clerk Authentication
+- Server-Sent Events for real-time logs
 
-```sql
--- Core tables
-users                    # User accounts (Clerk)
-github_installations     # GitHub App connections
-aws_connections          # AWS account links
-projects                 # User projects
-generations              # Infrastructure generation history
-deployment_logs          # Deployment operation logs
-```
+**Backend**
+- FastAPI (Python 3.11)
+- Amazon Bedrock AgentCore
+- Amazon Nova Pro
+- E2B Sandboxes
+- Supabase PostgreSQL
+- UV package manager
 
-See [`backend/database/schema.sql`](backend/database/schema.sql) for complete schema.
-
-</details>
-
----
-
-## 🧪 Testing
-
-```bash
-# Backend tests
-cd backend
-pytest
-
-# Frontend tests
-cd frontend
-npm test
-
-# End-to-end
-npm run test:e2e
-```
+**Infrastructure**
+- AWS Lambda, Amazon ECS, Amazon ECR
+- Terraform, AWS CDK
+- Cross-account IAM roles
 
 ---
 
-## 📖 Documentation
+## Security
 
-- [Production Cleanup Guide](PRODUCTION_CLEANUP.md) - Latest cleanup status
-- [Backend API Docs](http://localhost:8000/docs) - Auto-generated Swagger UI
-- [Database Schema](backend/database/schema.sql) - Complete SQL schema
-- [Infrastructure Guide](infrastructure/README.md) - AWS CDK deployment
+**Cross-Account Deployment**  
+Infrastructure deploys into the user's AWS account. No credentials are stored or shared—only IAM role assumption for secure, temporary access.
 
----
+**Sandboxed Execution**  
+All code analysis, Docker builds, and Terraform operations execute in isolated E2B sandboxes, preventing malicious code from compromising the platform.
 
-## 🤝 Contributing
+**Least-Privilege Access**  
+IAM roles are scoped to minimum required permissions for deployment operations.
 
-This is a hackathon project for the [AWS Bedrock AgentCore Devpost Challenge](https://amazonbedrock.devpost.com/).
+**Complete Audit Trail**  
+All infrastructure provisioned via CloudFormation with full tracking and versioning.
 
-Submissions deadline: **October 20, 2025**
-
----
-
-## 📜 License
-
-MIT License - see [LICENSE](LICENSE) file for details
+**Clean Deletion**  
+One-click teardown removes all resources and automatically cleans up Terraform state files.
 
 ---
 
-## 🏆 Hackathon Submission
+## Contact
 
-**Team:** Solo Developer  
-**Challenge:** AWS Bedrock AgentCore Devpost Hackathon  
-**Submission Date:** October 2025
-
-### Judging Criteria
-
-✅ **Technical Execution** - Multi-agent system with Bedrock AgentCore  
-✅ **Creativity** - Novel approach to DevOps automation  
-✅ **Competitive Positioning** - Unique AI-native solution  
-✅ **End-to-End Workflow** - Complete repo-to-deployment pipeline
+**Developer**: Raj Sudharshan  
+**Website**: [rajs.dev](https://rajs.dev)  
+**LinkedIn**: [linkedin.com/in/sudharshann05](https://www.linkedin.com/in/sudharshann05/)
 
 ---
-
-## 📞 Contact
-
-**Developer:** Raj Sudharshan  
-**Email:** raj@sirpi.dev  
-**GitHub:** [@rajsudharshan](https://github.com/rajsudharshan)
-
----
-
-<div align="center">
-
-**Built with ❤️ using Amazon Bedrock AgentCore**
-
-[Report Bug](https://github.com/YOUR_USERNAME/sirpi-aws-devpost/issues) • [Request Feature](https://github.com/YOUR_USERNAME/sirpi-aws-devpost/issues)
-
 </div>

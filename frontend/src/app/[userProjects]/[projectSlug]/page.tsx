@@ -131,11 +131,12 @@ export default function ProjectPage() {
     }
   }, [workflowState.status]);
 
+  // Auto-scroll logs as they appear
   useEffect(() => {
-    if (showLogs && logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    if (logsEndRef.current && workflowState.logs.length > 0 && showLogs) {
+      logsEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [showLogs]);
+  }, [workflowState.logs.length, showLogs]);
 
   useEffect(() => {
     if (user) {
@@ -658,6 +659,25 @@ export default function ProjectPage() {
                 </button>
               </div>
             )}
+
+            {/* Generating State - Show immediately with loading */}
+            {(workflowState.status === "started" ||
+              workflowState.status === "analyzing" ||
+              workflowState.status === "generating") &&
+              workflowState.logs.length === 0 && (
+                <div className="bg-[#0a0a0a] border border-[#333333] rounded-lg p-12 text-center">
+                  <div className="w-12 h-12 border-3 border-gray-700 border-t-blue-500 rounded-full animate-spin mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-200 mb-2">
+                    AI Agents Working...
+                  </h3>
+                  <p className="text-sm text-gray-400 mb-4">
+                    Analyzing repository and generating infrastructure files
+                  </p>
+                  <div className="text-xs text-gray-500">
+                    This may take 20-30 seconds
+                  </div>
+                </div>
+              )}
 
             {/* AI Agent Logs */}
             {workflowState.logs.length > 0 && (

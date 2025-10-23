@@ -11,11 +11,10 @@ logger = logging.getLogger(__name__)
 
 class SirpiAssistantService:
     def __init__(self):
+        # Lambda uses execution role automatically - don't pass credentials
         self.client = boto3.client(
             'bedrock-runtime',
-            region_name=settings.sirpi_assistant_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key
+            region_name=settings.sirpi_assistant_region
         )
         self.model_id = settings.sirpi_assistant_model_id
         self.agentcore_memory = get_agentcore_memory()

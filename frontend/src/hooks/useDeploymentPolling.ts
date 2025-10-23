@@ -112,7 +112,7 @@ export function useDeploymentPolling({
       pollLogs();
 
       // Then poll every 2 seconds (more readable, less API load)
-      pollIntervalRef.current = setInterval(pollLogs, 2000);
+      pollIntervalRef.current = setInterval(pollLogs, 1000);
       console.log('[Polling] Interval created');
     }
 

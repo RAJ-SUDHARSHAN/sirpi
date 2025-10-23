@@ -1,4 +1,6 @@
 // eraser.io
+
+Main:
 direction down
 title Sirpi Architecture Diagram
 
@@ -103,3 +105,268 @@ E2B Sandbox <-- CrossAccount IAMRole: 7. Temp Credentials
 Developer < User ALB: 11. Live Application
 AgentCore Memory < Specialized Agents
 User ECR > User ECS: Pull Image [color: green]
+
+
+
+
+SIRPI PLATFORM ORGANIZATION ARCHITECTURE DIAGRAM:
+title SIRPI PLATFORM ORGANIZATION ARCHITECTURE DIAGRAM
+
+Sirpi Platform [icon: server] {
+  // Frontend & Auth
+  Frontend Auth [icon: monitor] {
+    Next.js App [icon: nextdotjs, label: "Next.js App"]
+    SSE Stream [icon: arrow-down, label: "polling"]
+    Clerk Auth [icon: clerk, label: "Clerk Auth"]
+  }
+
+  // API Gateway Layer
+  API Gateway Layer [icon: aws-api-gateway] {
+    HTTP API Gateway [icon: aws-api-gateway, label: "REST + WebSocket"]
+  }
+
+  // Backend Services
+  FastAPI Backend [icon: lambda] {
+    Core API Endpoints [icon: code] {
+      FastAPI Lambda [icon: lambda, label: "FastAPI Lambda"]
+      Deployment Orchestrator [icon: play, label: "Deployment Orchestrator"]
+      GitHub Webhook Handler [icon: github, label: "Webhook Handler"]
+    }
+    Supabase PostgreSQL [icon: supabase, label: "Supabase DB"]
+  }
+
+  // Amazon Bedrock AgentCore - Multi-Agent System
+  Bedrock AgentCore [icon: aws-bedrock] {
+    Orchestrator Layer [icon: layers] {
+      Orchestrator Agent [icon: aws-bedrock, label: "Orchestrator"]
+    }
+    Specialized Agents [icon: users] {
+      Context Analyzer [icon: aws-bedrock, label: "Context Analyzer"]
+      Dockerfile Generator [icon: aws-bedrock, label: "Dockerfile Generator"]
+      Terraform Generator [icon: aws-bedrock, label: "Terraform Generator"]
+    }
+    AgentCore Memory [icon: aws-s3, label: "AgentCore Memory"]
+    AI Assistant [icon: aws-bedrock, label: "Sirpi Assistant"]
+  }
+
+  // External Integrations
+  External Integrations [icon: globe] {
+    GitHub API [icon: github, label: "GitHub API"]
+    E2B Cloud Sandbox [icon: cpu, label: "E2B Cloud Sandbox"]
+  }
+
+  // Artifact Storage
+  Artifact Storage [icon: aws-s3] {
+    S3 Artifacts [icon: aws-s3, label: "S3 Artifacts"]
+    S3 Templates [icon: aws-s3, label: "S3 Templates"]
+  }
+}
+
+// Standalone node for user
+Developer [icon: user]
+Sirpi Assistant [icon: sparkles]
+
+// Connections (vertical flow, top-down)
+Developer > Next.js App: 1. Login [color: blue]
+Next.js App > Clerk Auth: Authenticate [color: blue, style: dashed]
+Developer > HTTP API Gateway: 2. Connect Github Repository [color: blue]
+HTTP API Gateway > FastAPI Lambda
+FastAPI Lambda > Supabase PostgreSQL: Store Metadata [color: gray, style: dashed]
+FastAPI Lambda > Orchestrator Agent: 3. Trigger Analysis [color: red]
+Orchestrator Agent > Context Analyzer: 4. Analyze Repo [color: green]
+Context Analyzer > GitHub API: Fetch Code [color: green]
+Context Analyzer > E2B Cloud Sandbox: Test Env [color: green]
+Context Analyzer > AgentCore Memory: 5. Write Context [color: orange]
+Dockerfile Generator > S3 Templates: Load Templates [color: orange]
+Dockerfile Generator > AgentCore Memory: 7. Write Dockerfile [color: orange]
+Dockerfile Generator > S3 Artifacts: Store [color: orange]
+Terraform Generator > S3 Templates: Load Templates [color: orange]
+Terraform Generator > AgentCore Memory: 9. Write Terraform [color: orange]
+Terraform Generator > S3 Artifacts: Store [color: orange]
+Orchestrator Agent > GitHub API: 10. Create PR [color: green]
+GitHub Webhook Handler > Supabase PostgreSQL: Update Status [color: purple]
+GitHub Webhook Handler > Deployment Orchestrator: 12. Start Deploy [color: purple]
+E2B Cloud Sandbox > SSE Stream: Stream Logs / Polling [color: red, style: dashed]
+Developer > Sirpi Assistant: Ask Questions [color: purple, style: dotted]
+AgentCore Memory > Sirpi Assistant: Context Access [color: purple, style: dashed]
+Deployment Orchestrator > Supabase PostgreSQL: Store Results [color: gray, style: dashed]
+Core API Endpoints > E2B Cloud Sandbox: 13. Execute in Sandbox
+External Integrations > Core API Endpoints: 11. PR Merged Webhook
+Dockerfile Generator < AgentCore Memory: 6. Read Context
+Terraform Generator < AgentCore Memory: 8. Read Context
+Developer < SSE Stream: 14. Real-time Updates
+Developer < Sirpi Assistant: Contextual Help
+
+
+
+
+User's AWS Account - Cross-Account Deployment
+title User's AWS Account - Cross-Account Deployment
+
+// Top-level actors
+Developer [icon: user, label: "Developer/Owner"]
+End Users [icon: users]
+Sirpi Backend [icon: aws-lambda, label: "Sirpi Backend (External Account)"]
+
+// User's AWS Account (main group)
+User AWS Account [icon: aws, color: blue] {
+
+  // 1. Initial Setup - CloudFormation
+  Initial Setup CloudFormation [icon: aws-cloudformation, color: purple] {
+    CFN Template [icon: aws-cloudformation, label: "CloudFormation Template (Provided by Sirpi)"]
+    CFN Stack [icon: aws-cloudformation, label: "CloudFormation Stack (Created by User)"]
+  }
+
+  // 2. Cross-Account Security
+  "Cross-Account Security" [icon: aws-iam, color: orange] {
+    IAM Role Configuration [icon: aws-iam, color: orange] {
+      SirpiDeploymentRole [icon: aws-iam, label: "SirpiDeploymentRole (Cross-Account Access)"]
+      Trust Policy [icon: aws-iam, label: "Trust Policy (Allow Sirpi Account)"]
+      Permissions Policy [icon: aws-iam, label: "Permissions Policy (ECR, ECS, CloudFormation)"]
+    }
+  }
+
+  // 3. Container Registry
+  Container Registry [icon: aws-ecr, color: yellow] {
+    ECR Repository [icon: aws-ecr, label: "ECR Repository (Docker Images)"]
+    ECR Lifecycle [icon: aws-ecr, label: "Lifecycle Policy (Image Cleanup)"]
+  }
+
+  // 4. Terraform State Management
+  Terraform State Management [icon: aws-s3, color: green] {
+    State Backend [icon: aws-s3, color: green] {
+      Terraform State [icon: aws-s3, label: "S3 State Backend (Versioning, Encryption)"]
+      State Lock [icon: aws-dynamodb, label: "DynamoDB Lock Table"]
+    }
+    Terraform Logs [icon: aws-s3, label: "S3 Logs Bucket (Terraform Outputs, History)"]
+  }
+
+  // 5. Isolated Build Environment
+  Isolated Build Environment [icon: package, color: purple] {
+    E2B Sandbox [icon: cpu, label: "E2B Cloud Sandbox"]
+    Temporary Credentials [icon: aws-iam, label: "Temporary Credentials (AssumeRole Session)"]
+  }
+
+  // 6. Network Infrastructure
+  Network Infrastructure [icon: aws-vpc, color: green] {
+    VPC Configuration [icon: aws-vpc, color: green] {
+      VPC [icon: aws-vpc, label: "VPC (10.0.0.0/16)"]
+
+      Public Subnets [icon: aws-vpc] {
+        Public Subnet 1 [icon: aws-vpc, label: "Public Subnet 1 (us-east-1a)"]
+        Public Subnet 2 [icon: aws-vpc, label: "Public Subnet 2 (us-east-1b)"]
+      }
+
+      Private Subnets [icon: aws-vpc] {
+        Private Subnet 1 [icon: aws-vpc, label: "Private Subnet 1 (us-east-1a)"]
+        Private Subnet 2 [icon: aws-vpc, label: "Private Subnet 2 (us-east-1b)"]
+      }
+
+      Internet Gateway [icon: aws-internet-gateway]
+      NAT Gateway [icon: aws-nat-gateway, label: "NAT Gateway (Private Egress)"]
+    }
+  }
+
+  // 7. Application Infrastructure
+  Application Infrastructure [icon: aws-ecs, color: blue] {
+    Load Balancing [icon: aws-elb] {
+      ALB [icon: aws-elb, label: "Application Load Balancer (Public-facing)"]
+      Target Group [icon: aws-elb, label: "Target Group (Health Checks)"]
+    }
+    Container Orchestration [icon: aws-ecs] {
+      ECS Cluster [icon: aws-ecs, label: "ECS Cluster (Fargate)"]
+      ECS Service [icon: aws-ecs, label: "ECS Service (Auto-scaling)"]
+      ECS Task 1 [icon: aws-ecs, label: "Task 1 (Container)"]
+      ECS Task 2 [icon: aws-ecs, label: "Task 2 (Container)"]
+    }
+    Route 53 [icon: aws-route-53, label: "Route 53 (DNS, Optional)"]
+  }
+
+  // 8. Secrets & Environment
+  Secrets Environment [icon: aws-secrets-manager, color: yellow] {
+    Secrets Manager [icon: aws-secrets-manager, label: "Secrets Manager (API Keys, DB Creds, Env Vars)"]
+  }
+}
+
+// Connections
+
+// Step 1: Developer creates CloudFormation stack
+Developer > CFN Template: 1. Create Stack [color: purple]
+CFN Template > CFN Stack: Deploy Stack [color: purple]
+
+// Step 2: CloudFormation creates IAM role
+CFN Stack > SirpiDeploymentRole: 2. Create IAM Role [color: purple]
+CFN Stack > Trust Policy [color: purple]
+CFN Stack > Permissions Policy [color: purple]
+
+// Step 3: Sirpi backend assumes role
+Sirpi Backend > SirpiDeploymentRole: 3. AssumeRole Request [color: orange]
+SirpiDeploymentRole --> Temporary Credentials: 4. Temporary Credentials [color: orange]
+
+// Step 4: E2B uses temporary credentials
+Temporary Credentials --> E2B Sandbox: 5. Credentials [color: orange]
+
+// Step 5: Docker build and push to ECR
+E2B Sandbox > ECR Repository: 6. Build Image [color: orange]
+E2B Sandbox > ECR Repository: Push Image [color: orange]
+ECR Lifecycle --> ECR Repository: Cleanup Old Images [color: gray]
+
+// Step 6: Terraform state operations
+E2B Sandbox > Terraform State: 7. Terraform Init [color: green]
+Terraform State --> State Lock: Acquire Lock [color: green]
+E2B Sandbox > Terraform Logs: Store Logs [color: gray]
+
+// Step 7: Terraform provisions networking
+E2B Sandbox > VPC: 8. Provision VPC [color: green]
+VPC > Internet Gateway [color: green]
+VPC > NAT Gateway [color: green]
+
+// Step 8: Terraform provisions application infrastructure
+E2B Sandbox > ALB: 9. Provision ALB & ECS [color: green]
+E2B Sandbox > ECS Cluster [color: green]
+
+// Load balancer setup
+ALB > Target Group [color: blue]
+
+// ECS cluster setup
+ECS Cluster > ECS Service [color: blue]
+ECS Service > ECS Task 1 [color: blue]
+ECS Service > ECS Task 2 [color: blue]
+
+// Tasks in private subnets
+
+// ALB in public subnets
+
+// Target group connects to tasks
+Target Group --> ECS Task 1: Health Checks [color: blue]
+Target Group --> ECS Task 2: Health Checks [color: blue]
+
+// Tasks pull from ECR
+ECS Task 1 --> ECR Repository: Pull Image [color: orange]
+ECS Task 2 --> ECR Repository: Pull Image [color: orange]
+
+// Tasks access secrets
+ECS Task 1 --> Secrets Manager: Get Secrets [color: yellow]
+ECS Task 2 --> Secrets Manager: Get Secrets [color: yellow]
+
+// Optional DNS
+Route 53 --> ALB: DNS Routing [color: blue]
+
+// Step 9: External access
+Internet Gateway > ALB: Internet Access [color: blue]
+End Users > Route 53: 10. Access Application [color: blue]
+
+// NAT Gateway for egress
+NAT Gateway --> Internet Gateway [color: gray]
+
+// Step 10: State cleanup after destroy
+Developer --> Terraform State: 11. Destroy (Optional) [color: red]
+Terraform State --> VPC: Clean Teardown [color: red]
+VPC > Public Subnets
+VPC > Private Subnets
+ALB --> Public Subnets
+Private Subnets --> NAT Gateway: Egress Traffic
+VPC Configuration > Private Subnets
+Private Subnets --> VPC Configuration: Egress Traffic
+Private Subnet 1 <-- ECS Task 1
+Private Subnet 2 <-- ECS Task 2

@@ -2,7 +2,7 @@
 
 Every developer has faced it — the anxiety of deploying to production. The endless YAML configurations, Dockerfile debugging sessions, Terraform state conflicts, and that sinking feeling when your infrastructure fails at 2 AM.
 
-While platforms like Heroku made deployment simple, they came with vendor lock-in and limited control. AWS offers incredible power and flexibility, but requires deep DevOps expertise to use correctly. Junior developers shouldn't need to master Kubernetes, Docker, and Terraform just to ship their first app.
+While platforms like Heroku and Vercel made deployment simple, they came with vendor lock-in and limited control. AWS offers incredible power and flexibility, but requires deep DevOps expertise to use correctly. Junior developers shouldn't need to master Kubernetes, Docker, and Terraform just to ship their first app.
 
 That's why I built **Sirpi** (*Tamil: sculptor*) — an AI-native platform that sculpts raw GitHub repositories into production-ready AWS infrastructure. It combines the simplicity of platform-as-a-service with the power of infrastructure-as-code—**with zero vendor lock-in and full ownership**.
 
@@ -21,8 +21,9 @@ Sirpi is an AI-native DevOps automation platform that:
 - **Streams real-time logs** from isolated E2B sandboxes during builds and deployments
 - **Provides AI assistance** through Amazon Nova Pro with full deployment context via AgentCore Memory
 - **Enables complete ownership** — download all Terraform files and state, migrate anywhere, zero vendor lock-in
+- **Provides clean exit** — destroy infrastructure anytime with no dangling resources or unexpected AWS costs
 
-In short: from GitHub URL to production in minutes, with infrastructure you fully own and control.
+In short: from GitHub URL to production in under 5 minutes, with infrastructure you fully own and control.
 
 ---
 
@@ -46,10 +47,10 @@ I used a modern stack with sophisticated AI orchestration:
 
 **AI Agent System**
 - Custom orchestrator coordinating specialized agents
-- Context Analyzer using GitHub API and E2B sandboxes
+- Context Analyzer using GitHub API to understand repository structure
 - Dockerfile Generator with template-based optimization
-- Terraform Generator with production-ready configurations
-- All agents communicate via AgentCore Memory—no hardcoded workflows
+- Terraform Generator with production-ready configurations following AWS best practices
+- All agents communicate via AgentCore Memory—enabling stateful workflows without hardcoded logic
 
 **Infrastructure**
 - AWS Lambda for backend hosting
@@ -89,9 +90,13 @@ This allowed me to:
 
 **Balancing AI autonomy with safety gates** — determining where human approval was essential (PR merge, IAM role setup) versus where agents could proceed autonomously
 
+**Intelligent repository analysis** — handling diverse repository structures including branch name variations (main/master), existing Dockerfiles in different locations (root, docker/, .docker/), multiple package managers, monorepo detection, and framework-specific entry point conventions
+
 ---
 
 ## Accomplishments that I'm proud of
+
+**Reduced deployment complexity from ~40 configuration files to zero** — developers need only need to connect their GitHub; Sirpi handles Dockerfile, Terraform, IAM policies, and CloudFormation automatically
 
 **Built a production-ready platform, not a demo** — complete error handling, state management, and clean teardown workflows that would work in enterprise environments
 
@@ -104,6 +109,8 @@ This allowed me to:
 **Designed for zero vendor lock-in** — users can download all Terraform files and state, manage infrastructure independently, or migrate to other platforms
 
 **Made complex DevOps accessible** — a junior developer with zero DevOps / AWS knowledge can deploy production infrastructure in minutes
+
+- **Achieved end-to-end deployment speed** — complete infrastructure provisioning from repository URL to live application in under 5 minutes
 
 ---
 
@@ -127,7 +134,7 @@ This allowed me to:
 
 **Immediate (Post-Hackathon)**
 - Support for additional deployment targets (Kubernetes, AWS App Runner, AWS Amplify)
-- Enhanced Terraform templates for databases, caching, and queuing services
+- Enhanced Terraform templates for RDS, ElastiCache, SQS, and EventBridge
 - Improved AI Assistant with deployment troubleshooting and optimization suggestions
 - Multi-region deployment support
 
